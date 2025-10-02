@@ -1,5 +1,7 @@
 # YouTube Music Downloader
 
+[🇬🇧 English version](README_EN.md)
+
 J'en avais marre d'attendre des heures pour télécharger mes playlists, alors j'ai fait ce script.
 
 ## Ce que ça fait

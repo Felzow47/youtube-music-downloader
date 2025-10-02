@@ -1,5 +1,7 @@
 # YouTube Music Downloader
 
+[🇫🇷 Version française](README.md)
+
 I was tired of waiting hours to download my playlists, so I made this script.
 
 ## What it does
