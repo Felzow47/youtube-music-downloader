@@ -30,13 +30,18 @@ You also need FFmpeg installed on your machine.
 
 Easiest on Windows: double-click `ULTRA_DOWNLOADER.bat`
 
-Otherwise: `python scripts/ultra_downloader.py`
+Otherwise: `python ultra_downloader.py`
 
-## The scripts
+## The script
 
-**ultra_downloader.py** - For multiple big playlists in parallel  
-**multi_threaded_downloader.py** - Balanced version  
-**simple_downloader.py** - Basic version for testing  
+**ultra_downloader.py** - Ultra-optimized script with all features:
+
+- Multiple playlists downloaded in parallel
+- Playlist verification before download
+- Special characters handling in titles
+- Enhanced user interface
+- Detailed statistics
+- Automatic organization in `downloads/` folder  
 
 ## Recommended config
 

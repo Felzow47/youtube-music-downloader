@@ -23,7 +23,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 REM Lancer le script ultra-optimisé
-".venv\Scripts\python.exe" scripts\ultra_downloader.py
+".venv\Scripts\python.exe" ultra_downloader.py
 
 echo.
 echo ✅ Script terminé!

@@ -84,6 +84,48 @@ def progress_hook(d):
         filename = os.path.basename(d.get('filename', 'Unknown'))
         safe_print(f"✅ Fini: {filename[:40]}...")
 
+def post_process_hook(d):
+    """Hook de post-processing pour nettoyer les noms de fichiers"""
+    if d['status'] == 'finished':
+        original_path = Path(d['filepath'])
+        if original_path.exists() and '*' in original_path.name:
+            # Nettoyer le nom de fichier
+            clean_name = clean_filename(original_path.stem) + original_path.suffix
+            new_path = original_path.parent / clean_name
+            
+            # Éviter les conflits de noms
+            counter = 1
+            while new_path.exists() and new_path != original_path:
+                name_without_ext = clean_filename(original_path.stem)
+                new_path = original_path.parent / f"{name_without_ext}_{counter}{original_path.suffix}"
+                counter += 1
+            
+            if new_path != original_path:
+                try:
+                    original_path.rename(new_path)
+                    safe_print(f"🔄 Renommé: {new_path.name}")
+                except Exception as e:
+                    logger.error(f"Erreur renommage {original_path} -> {new_path}: {e}")
+
+def clean_filename(title):
+    """Nettoie un titre pour en faire un nom de fichier sûr"""
+    if not title:
+        return "Unknown"
+    
+    # Remplacer les astérisques par des X
+    cleaned = title.replace('***', 'XXX').replace('**', 'XX').replace('*', 'X')
+    
+    # Remplacer d'autres caractères problématiques
+    replacements = {
+        '/': '-', '\\': '-', '|': '-', '<': '(', '>': ')', 
+        ':': '-', '"': "'", '?': '', '*': 'X'
+    }
+    
+    for old, new in replacements.items():
+        cleaned = cleaned.replace(old, new)
+    
+    return cleaned.strip()
+
 def get_ultra_ydl_opts(output_dir):
     """Configuration ultra-optimisée pour yt-dlp"""
     return {
@@ -100,8 +142,11 @@ def get_ultra_ydl_opts(output_dir):
             'add_metadata': True,
         }],
         
-        # Template de sortie avec sanitization
-        'outtmpl': os.path.join(output_dir, '%(title).100s.%(ext)s'),
+        # Template de sortie avec sanitization personnalisée
+        'outtmpl': {
+            'default': os.path.join(output_dir, '%(title).100s.%(ext)s'),
+        },
+        'outtmpl_na_placeholder': '',
         
         # Options de performance maximales
         'concurrent_fragment_downloads': 8,  # Plus de fragments parallèles
@@ -120,8 +165,9 @@ def get_ultra_ydl_opts(output_dir):
         'no_warnings': True,
         'extract_flat': False,
         
-        # Hook de progression
+        # Hooks de progression et post-processing
         'progress_hooks': [progress_hook],
+        'postprocessor_hooks': [post_process_hook],
         
         # Éviter les limitations
         'sleep_interval': 0,
@@ -142,11 +188,28 @@ def download_single_video(video_info, output_dir, playlist_name):
     title = video_info.get('title', 'Unknown')[:50]
     url = f"https://www.youtube.com/watch?v={video_id}"
     
-    # Vérifier si le fichier existe déjà
-    potential_files = list(Path(output_dir).glob(f"{title}*.mp3"))
-    if potential_files:
-        global_stats.add_video_success()
-        return True
+    # Vérifier si le fichier existe déjà (méthode sécurisée sans glob)
+    output_path = Path(output_dir)
+    if output_path.exists():
+        # Créer plusieurs variantes du titre pour la correspondance
+        title_variants = [
+            title,  # Titre original
+            clean_filename(title),  # Version avec X au lieu de *
+            title.replace('***', 'XXX').replace('**', 'XX').replace('*', 'X'),  # Astérisques remplacées par X
+            title.replace('*', ''),  # Sans astérisques
+            title.replace('*', '_'),  # Astérisques remplacées par underscore
+            "".join(c for c in title if c.isalnum() or c in (' ', '-', '_', '.')).strip()  # Complètement sanitizé
+        ]
+        
+        # Chercher des fichiers existants qui correspondent à une des variantes
+        for existing_file in output_path.iterdir():
+            if existing_file.suffix.lower() == '.mp3':
+                file_stem_lower = existing_file.stem.lower()
+                # Tester chaque variante du titre
+                for variant in title_variants:
+                    if variant and file_stem_lower.startswith(variant.lower()[:30]):  # Limiter à 30 chars pour éviter les titres trop longs
+                        global_stats.add_video_success()
+                        return True
     
     ydl_opts = get_ultra_ydl_opts(output_dir)
     
@@ -195,14 +258,18 @@ def download_playlist_ultra_fast(playlist_url, video_threads=8):
         safe_print(f"❌ Aucune vidéo trouvée: {playlist_url}")
         return False
     
-    # Création du dossier avec gestion des conflits
-    output_dir = playlist_name
+    # Création du dossier downloads s'il n'existe pas
+    downloads_path = Path("downloads")
+    downloads_path.mkdir(exist_ok=True)
+    
+    # Création du dossier playlist avec gestion des conflits
+    output_dir = downloads_path / playlist_name
     counter = 1
-    while Path(output_dir).exists() and any(Path(output_dir).iterdir()):
-        output_dir = f"{playlist_name}_{counter}"
+    while output_dir.exists() and any(output_dir.iterdir()):
+        output_dir = downloads_path / f"{playlist_name}_{counter}"
         counter += 1
     
-    Path(output_dir).mkdir(exist_ok=True)
+    output_dir.mkdir(exist_ok=True)
     
     global_stats.add_playlist(len(entries))
     safe_print(f"🎵 [{playlist_name}] Démarrage: {len(entries)} titres, {video_threads} threads")
@@ -271,6 +338,50 @@ def print_final_stats():
     safe_print(f"💪 Efficacité: {(videos_done/videos_total)*100:.1f}%")
     safe_print(f"{'='*60}")
 
+def verify_playlists(playlist_urls):
+    """Vérifie et affiche les informations des playlists avant téléchargement"""
+    print(f"\n🔍 === VÉRIFICATION DES PLAYLISTS ===")
+    
+    playlist_infos = []
+    for i, url in enumerate(playlist_urls, 1):
+        print(f"📋 [{i}/{len(playlist_urls)}] Vérification en cours...")
+        
+        try:
+            playlist_name, entries = extract_playlist_info_fast(url)
+            if playlist_name and entries:
+                playlist_infos.append({
+                    'url': url,
+                    'name': playlist_name,
+                    'count': len(entries)
+                })
+                print(f"✅ {playlist_name} ({len(entries)} vidéos)")
+            else:
+                print(f"❌ Playlist invalide ou vide: {url[:50]}...")
+                
+        except Exception as e:
+            print(f"❌ Erreur lors de la vérification: {str(e)[:50]}...")
+    
+    if not playlist_infos:
+        print("❌ Aucune playlist valide trouvée.")
+        return False, []
+    
+    # Affichage récapitulatif
+    print(f"\n📊 === RÉCAPITULATIF ===")
+    total_videos = 0
+    
+    for i, info in enumerate(playlist_infos, 1):
+        print(f"🎵 [{i}] {info['name']}")
+        print(f"    📹 {info['count']} vidéos")
+        print(f"    🔗 {info['url'][:60]}{'...' if len(info['url']) > 60 else ''}")
+        total_videos += info['count']
+        print()
+    
+    print(f"📈 TOTAL: {len(playlist_infos)} playlists → {total_videos} vidéos")
+    
+    # Confirmation utilisateur
+    response = input("✅ Continuer le téléchargement ? (O/N): ").strip().lower()
+    return response in ['o', 'oui', 'y', 'yes', ''], [info['url'] for info in playlist_infos]
+
 def main():
     """Fonction principale ultra-optimisée"""
     print("🎵 === TÉLÉCHARGEUR YOUTUBE MUSIC ULTRA-OPTIMISÉ === 🎵")
@@ -297,7 +408,18 @@ def main():
         print("❌ Aucune URL valide.")
         return
     
-    print(f"\n📊 {len(playlist_urls)} playlists détectées")
+    # Vérification des playlists avec confirmation
+    should_continue, validated_urls = verify_playlists(playlist_urls)
+    
+    if not should_continue:
+        print("⏹️  Téléchargement annulé.")
+        return
+    
+    if not validated_urls:
+        print("❌ Aucune playlist valide à télécharger.")
+        return
+    
+    print(f"\n📊 {len(validated_urls)} playlists validées")
     
     # Configuration avancée
     try:
@@ -313,7 +435,7 @@ def main():
         video_threads = 6
     
     print(f"\n🎯 Configuration finale:")
-    print(f"   - {len(playlist_urls)} playlists")
+    print(f"   - {len(validated_urls)} playlists")
     print(f"   - {playlist_threads} playlists simultanées")
     print(f"   - {video_threads} threads vidéo par playlist")
     print(f"   - Capacité théorique: {playlist_threads * video_threads} téléchargements simultanés")
@@ -321,7 +443,7 @@ def main():
     input("⏯️  Appuyez sur Entrée pour lancer l'ultra-téléchargement...")
     
     try:
-        download_all_playlists_parallel(playlist_urls, playlist_threads, video_threads)
+        download_all_playlists_parallel(validated_urls, playlist_threads, video_threads)
         print_final_stats()
         
     except KeyboardInterrupt:

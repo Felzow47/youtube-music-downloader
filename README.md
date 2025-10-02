@@ -30,17 +30,38 @@ Il faut aussi FFmpeg installé sur votre machine.
 
 Le plus simple sur Windows : double-cliquez sur `ULTRA_DOWNLOADER.bat`
 
-Sinon : `python scripts/ultra_downloader.py`
+Sinon : `python ultra_downloader.py`
 
-## Les scripts
+## Le script
 
-**ultra_downloader.py** - Pour plusieurs grosses playlists en parallèle  
-**multi_threaded_downloader.py** - Version équilibrée  
-**simple_downloader.py** - Version basique pour tester  
+**ultra_downloader.py** - Script ultra-optimisé avec toutes les fonctionnalités :
+
+- Téléchargement de plusieurs playlists en parallèle
+- Vérification des playlists avant téléchargement
+- Gestion des caractères spéciaux dans les titres
+- Interface utilisateur améliorée
+- Statistiques détaillées
+- Organisation automatique dans le dossier `downloads/`
+
+## Organisation des fichiers
+
+Les playlists téléchargées sont automatiquement organisées :
+
+```text
+yt/
+├── downloads/
+│   ├── Ma Playlist Rock/
+│   │   ├── Chanson 1.mp3
+│   │   └── Chanson 2.mp3
+│   └── Ma Playlist Pop/
+│       ├── Hit 1.mp3
+│       └── Hit 2.mp3
+└── ultra_downloader.py
+```
 
 ## Config recommandée
 
-- 2-3 playlists max en parallèle 
+- 2-3 playlists max en parallèle
 - 6-8 threads par playlist
 - Ne pas abuser sinon YouTube vous limite
 
