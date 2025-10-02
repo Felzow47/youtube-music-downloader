@@ -13,12 +13,15 @@ import threading
 from pathlib import Path
 import sys
 
+# Créer le dossier logs s'il n'existe pas
+Path("logs").mkdir(exist_ok=True)
+
 # Configuration du logging
 logger = logging.getLogger("yt_dlp_multithread")
 logger.setLevel(logging.INFO)
 
 # Handler pour fichier d'erreurs
-file_handler = logging.FileHandler("download_errors.log", encoding="utf-8")
+file_handler = logging.FileHandler("logs/download_errors.log", encoding="utf-8")
 file_handler.setLevel(logging.ERROR)
 file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 logger.addHandler(file_handler)

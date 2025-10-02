@@ -30,10 +30,8 @@ env/
 .env
 
 # Logs
+logs/
 *.log
-errors.log
-download_errors.log
-ultra_download_errors.log
 
 # Fichiers de téléchargement
 *.mp3
