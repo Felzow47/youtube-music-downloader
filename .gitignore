@@ -1,0 +1,83 @@
+# Fichiers Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environnement virtuel
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# Logs
+*.log
+errors.log
+download_errors.log
+ultra_download_errors.log
+
+# Fichiers de téléchargement
+*.mp3
+*.mp4
+*.m4a
+*.webm
+*.wav
+*.flac
+
+# Dossiers de téléchargement
+*/
+!scripts/
+!.venv/
+
+# Anciens scripts (à exclure du repo)
+main_audio.py
+YT-DLP_Audio.bat
+YT-DLP_Video.bat
+
+# Exécutables
+yt-dlp.exe
+*.exe
+
+# Fichiers temporaires
+*.tmp
+*.temp
+
+# Fichiers système Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Fichiers système macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Autres
+*.bak
+*.orig
