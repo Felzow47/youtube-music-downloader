@@ -34,6 +34,10 @@ console_handler.setLevel(logging.INFO)
 console_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
 logger.addHandler(console_handler)
 
+# Logger pour yt-dlp (capture les erreurs internes)
+yt_dlp_logger = logging.getLogger("yt-dlp")
+yt_dlp_logger.addHandler(file_handler)
+
 # Verrous pour éviter les conflits
 print_lock = threading.Lock()
 stats_lock = threading.Lock()
@@ -83,6 +87,17 @@ def progress_hook(d):
     if d['status'] == 'finished':
         filename = os.path.basename(d.get('filename', 'Unknown'))
         safe_print(f"✅ Fini: {filename[:40]}...")
+
+# Variables globales pour stocker les noms de fichiers créés
+current_download_files = set()
+
+def post_process_hook(d):
+    """Hook pour capturer les noms de fichiers finaux créés"""
+    if d.get('status') == 'finished':
+        # Récupérer le chemin du fichier final
+        filepath = d.get('filepath') or d.get('filename')
+        if filepath and Path(filepath).suffix.lower() == '.mp3':
+            current_download_files.add(str(Path(filepath)))
 
 def clean_filename(title):
     """Nettoie un titre pour en faire un nom de fichier sûr"""
@@ -136,11 +151,15 @@ def get_ultra_ydl_opts(output_dir):
         
         # Gestion des erreurs
         'ignoreerrors': True,
-        'no_warnings': True,
+        'no_warnings': False,  # Activer les warnings pour le debug
         'extract_flat': False,
         
-        # Hook de progression
+        # Logger personnalisé pour capturer toutes les erreurs
+        'logger': logger,
+        
+        # Hooks de progression et post-processing
         'progress_hooks': [progress_hook],
+        'postprocessor_hooks': [post_process_hook],
         
         # Éviter les limitations
         'sleep_interval': 0,
@@ -186,43 +205,36 @@ def download_single_video(video_info, output_dir, playlist_name):
     
     ydl_opts = get_ultra_ydl_opts(output_dir)
     
+    # Vider la liste des fichiers créés avant le téléchargement
+    current_download_files.clear()
+    
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         
-        # Vérifier que le fichier MP3 final existe vraiment
-        output_path = Path(output_dir)
+        # Vérifier que le fichier MP3 final existe vraiment en utilisant le nom capturé
         mp3_found = False
-        if output_path.exists():
-            # Chercher un fichier MP3 qui correspond au titre (même logique que la vérification d'existence)
-            title_variants = [
-                title,
-                clean_filename(title),
-                title.replace('***', 'XXX').replace('**', 'XX').replace('*', 'X'),
-                title.replace('*', ''),
-            ]
-            
-            for existing_file in output_path.iterdir():
-                if existing_file.suffix.lower() == '.mp3':
-                    file_stem_lower = existing_file.stem.lower()
-                    for variant in title_variants:
-                        if variant and file_stem_lower.startswith(variant.lower()[:30]):
-                            mp3_found = True
-                            break
-                    if mp3_found:
-                        break
+        for filepath in current_download_files:
+            if Path(filepath).exists() and Path(filepath).suffix.lower() == '.mp3':
+                mp3_found = True
+                safe_print(f"✅ MP3 confirmé: {Path(filepath).name}")
+                break
         
         if mp3_found:
             global_stats.add_video_success()
             return True
         else:
             global_stats.add_video_failure()
-            logger.error(f"[{playlist_name}] Fichier MP3 non trouvé après téléchargement: {title}")
+            error_msg = f"[{playlist_name}] Fichier MP3 non trouvé après téléchargement: {title}"
+            logger.error(error_msg)
+            safe_print(f"❌ {error_msg}")
             return False
         
     except Exception as e:
         global_stats.add_video_failure()
-        logger.error(f"[{playlist_name}] Erreur pour {title}: {str(e)}")
+        error_msg = f"[{playlist_name}] Erreur pour {title}: {str(e)}"
+        logger.error(error_msg)
+        safe_print(f"❌ {error_msg}")
         return False
 
 def extract_playlist_info_fast(playlist_url):
