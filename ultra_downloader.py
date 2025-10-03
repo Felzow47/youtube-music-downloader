@@ -191,10 +191,6 @@ def get_ultra_ydl_opts(output_dir):
     # Ajouter les cookies si le fichier existe
     if Path('cookies.txt').exists():
         opts['cookiefile'] = 'cookies.txt'
-        safe_print("🍪 Cookies YouTube détectés - Accès Premium activé")
-    else:
-        safe_print("ℹ️  Pas de cookies détectés - Certaines chansons Premium pourraient échouer")
-        safe_print("📖 Consultez COOKIES_GUIDE.md pour configurer l'accès Premium")
     
     return opts
 
@@ -486,6 +482,16 @@ def main():
     print("   - Gestion intelligente des doublons")
     print("   - Logging complet des erreurs")
     print(f"📝 Logs de cette session: {log_filename}")
+    print()
+    
+    # Vérification des cookies d'authentification
+    if Path('cookies.txt').exists():
+        print("🍪 Cookies YouTube détectés - Accès Premium activé")
+        logger.info("🍪 Cookies YouTube détectés et chargés pour l'authentification Premium")
+    else:
+        print("ℹ️  Pas de cookies détectés - Certaines chansons Premium pourraient échouer")
+        print("📖 Consultez docs/COOKIES_GUIDE.md pour configurer l'accès Premium")
+        logger.info("ℹ️  Aucun fichier cookies.txt trouvé - Mode public uniquement")
     print()
     
     # Saisie des URLs
