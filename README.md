@@ -59,6 +59,16 @@ yt/
 └── ultra_downloader.py
 ```
 
+## 🍪 Accès YouTube Premium
+
+Si vous avez un abonnement YouTube Premium et voulez télécharger des chansons exclusives Premium :
+
+1. Exportez vos cookies YouTube avec une extension de navigateur
+2. Placez le fichier `cookies.txt` dans le dossier du script
+3. Le script détectera automatiquement les cookies
+
+👉 **Guide détaillé** : Consultez [COOKIES_GUIDE.md](COOKIES_GUIDE.md) pour les instructions complètes.
+
 ## Config recommandée
 
 - 2-3 playlists max en parallèle

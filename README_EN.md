@@ -43,6 +43,16 @@ Otherwise: `python ultra_downloader.py`
 - Detailed statistics
 - Automatic organization in `downloads/` folder  
 
+## 🍪 YouTube Premium Access
+
+If you have a YouTube Premium subscription and want to download Premium-exclusive songs:
+
+1. Export your YouTube cookies using a browser extension
+2. Place the `cookies.txt` file in the script folder
+3. The script will automatically detect the cookies
+
+👉 **Detailed guide**: Check [COOKIES_GUIDE.md](COOKIES_GUIDE.md) for complete instructions.
+
 ## Recommended config
 
 - 2-3 playlists max in parallel
