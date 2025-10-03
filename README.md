@@ -1,6 +1,6 @@
 # YouTube Music Downloader
 
-[🇬🇧 English version](README_EN.md)
+[🇬🇧 English version](docs/README_EN.md) | [📚 All documentation](docs/README.md)
 
 J'en avais marre d'attendre des heures pour télécharger mes playlists, alors j'ai fait ce script.
 
@@ -67,7 +67,7 @@ Si vous avez un abonnement YouTube Premium et voulez télécharger des chansons 
 2. Placez le fichier `cookies.txt` dans le dossier du script
 3. Le script détectera automatiquement les cookies
 
-👉 **Guide détaillé** : Consultez [COOKIES_GUIDE.md](COOKIES_GUIDE.md) pour les instructions complètes.
+👉 **Guide détaillé** : Consultez [COOKIES_GUIDE.md](docs/COOKIES_GUIDE.md) pour les instructions complètes.
 
 ## Config recommandée
 
