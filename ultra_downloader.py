@@ -84,29 +84,6 @@ def progress_hook(d):
         filename = os.path.basename(d.get('filename', 'Unknown'))
         safe_print(f"✅ Fini: {filename[:40]}...")
 
-def post_process_hook(d):
-    """Hook de post-processing pour nettoyer les noms de fichiers"""
-    if d['status'] == 'finished':
-        original_path = Path(d['filepath'])
-        if original_path.exists() and '*' in original_path.name:
-            # Nettoyer le nom de fichier
-            clean_name = clean_filename(original_path.stem) + original_path.suffix
-            new_path = original_path.parent / clean_name
-            
-            # Éviter les conflits de noms
-            counter = 1
-            while new_path.exists() and new_path != original_path:
-                name_without_ext = clean_filename(original_path.stem)
-                new_path = original_path.parent / f"{name_without_ext}_{counter}{original_path.suffix}"
-                counter += 1
-            
-            if new_path != original_path:
-                try:
-                    original_path.rename(new_path)
-                    safe_print(f"🔄 Renommé: {new_path.name}")
-                except Exception as e:
-                    logger.error(f"Erreur renommage {original_path} -> {new_path}: {e}")
-
 def clean_filename(title):
     """Nettoie un titre pour en faire un nom de fichier sûr"""
     if not title:
@@ -142,11 +119,8 @@ def get_ultra_ydl_opts(output_dir):
             'add_metadata': True,
         }],
         
-        # Template de sortie avec sanitization personnalisée
-        'outtmpl': {
-            'default': os.path.join(output_dir, '%(title).100s.%(ext)s'),
-        },
-        'outtmpl_na_placeholder': '',
+        # Template de sortie standard (yt-dlp gère les caractères interdits automatiquement)
+        'outtmpl': os.path.join(output_dir, '%(title).100s.%(ext)s'),
         
         # Options de performance maximales
         'concurrent_fragment_downloads': 8,  # Plus de fragments parallèles
@@ -165,9 +139,8 @@ def get_ultra_ydl_opts(output_dir):
         'no_warnings': True,
         'extract_flat': False,
         
-        # Hooks de progression et post-processing
+        # Hook de progression
         'progress_hooks': [progress_hook],
-        'postprocessor_hooks': [post_process_hook],
         
         # Éviter les limitations
         'sleep_interval': 0,
@@ -217,8 +190,35 @@ def download_single_video(video_info, output_dir, playlist_name):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         
-        global_stats.add_video_success()
-        return True
+        # Vérifier que le fichier MP3 final existe vraiment
+        output_path = Path(output_dir)
+        mp3_found = False
+        if output_path.exists():
+            # Chercher un fichier MP3 qui correspond au titre (même logique que la vérification d'existence)
+            title_variants = [
+                title,
+                clean_filename(title),
+                title.replace('***', 'XXX').replace('**', 'XX').replace('*', 'X'),
+                title.replace('*', ''),
+            ]
+            
+            for existing_file in output_path.iterdir():
+                if existing_file.suffix.lower() == '.mp3':
+                    file_stem_lower = existing_file.stem.lower()
+                    for variant in title_variants:
+                        if variant and file_stem_lower.startswith(variant.lower()[:30]):
+                            mp3_found = True
+                            break
+                    if mp3_found:
+                        break
+        
+        if mp3_found:
+            global_stats.add_video_success()
+            return True
+        else:
+            global_stats.add_video_failure()
+            logger.error(f"[{playlist_name}] Fichier MP3 non trouvé après téléchargement: {title}")
+            return False
         
     except Exception as e:
         global_stats.add_video_failure()
