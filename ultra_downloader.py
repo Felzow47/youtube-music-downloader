@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 import sys
 from queue import Queue
-import json
+import json  # Pour la pause au début
 
 # Créer le dossier logs s'il n'existe pas
 Path("logs").mkdir(exist_ok=True)
@@ -22,8 +22,8 @@ Path("logs").mkdir(exist_ok=True)
 logger = logging.getLogger("yt_dlp_ultra")
 logger.setLevel(logging.INFO)
 
-# Créer un nom de fichier unique avec timestamp
-session_timestamp = time.strftime("%Y%m%d_%H%M%S")
+# Créer un nom de fichier unique avec timestamp (format DD_MM_YY_HHh_MM_SS)
+session_timestamp = time.strftime("%d_%m_%y_%Hh_%M_%S")
 log_filename = f"logs/ultra_download_{session_timestamp}.log"
 
 # Handler pour fichier d'erreurs de cette session
@@ -41,6 +41,13 @@ logger.addHandler(console_handler)
 # Logger pour yt-dlp (capture les erreurs internes)
 yt_dlp_logger = logging.getLogger("yt-dlp")
 yt_dlp_logger.addHandler(file_handler)
+
+# Logger silencieux pour yt-dlp (aucune sortie)
+class SilentLogger:
+    def debug(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg): pass
+    def info(self, msg): pass
 
 # Verrous pour éviter les conflits
 print_lock = threading.Lock()
@@ -186,6 +193,9 @@ def get_ultra_ydl_opts(output_dir):
         # Logger personnalisé pour capturer toutes les erreurs
         'logger': logger,
         
+        # Hook de progression pour afficher les pourcentages
+        'progress_hooks': [progress_hook],
+        
     }
     
     # Ajouter les cookies si le fichier existe
@@ -193,6 +203,165 @@ def get_ultra_ydl_opts(output_dir):
         opts['cookiefile'] = 'cookies.txt'
     
     return opts
+
+def test_premium_access():
+    """
+    Teste si l'utilisateur connecté avec les cookies a un accès Premium
+    en téléchargeant la DAUBE de Slimane (on déteste ce qu'on fait mais c'est efficace)
+    
+    IMPORTANT: Slimane c'est les SEULES musiques qu'on a trouvées en Premium-only 
+    parce que... je sais pas, il est chiant ? 🤡 Après même s'il est chiant, au moins 
+    grâce à ses daubes je peux tester si les cookies Premium fonctionnent ! (Au vu de la vitesse à laquelle ils expirent.)
+    Je DÉTESTE Slimane mais toutes ses merdes sont Premium-only, donc c'est le test le plus fiable.
+    
+    ⚠️  APPEL AUX CONTRIBUTIONS ⚠️
+    Si quelqu'un lit ça et utilise ce script et connaît d'autres musiques Premium-only 
+    (AUTRE que cette daube de Slimane), MERCI d'ouvrir une issue GitHub ou une pull request 
+    avec GRAND PLAISIR ! On sera ravis de remplacer cette merde par autre chose ! 🙏
+    
+    On télécharge juste pour tester puis à la MILLISECONDE où on a le résultat 
+    on supprime cette MERDE ! 🔥💀 Pas question de garder Slimane une seconde de plus !
+    SLIMANE = NECESSARY EVIL pour tester Premium. Désolé pas désolé.
+    """
+    if not Path('cookies.txt').exists():
+        return False, "❌ Aucun fichier cookies.txt trouvé"
+    
+    safe_print("🔍 Test de l'accès Premium en cours...")
+    
+    # URLs de test Premium-only - ATTENTION : C'EST DU SLIMANE ! 🤮
+    # JE DÉTESTE cette merde de Slimane mais c'est le seul moyen de tester Premium
+    # Toutes ses musiques sont Premium-only,il nous force à utiliser ses daubes
+    # On télécharge juste pour tester puis on supprime immédiatement cette merde
+    premium_test_urls = [
+        "https://music.youtube.com/watch?v=2TaiYw83ZgQ",  # Slimane - Mise à jour (JE DÉTESTE CETTE MERDE)
+        "https://music.youtube.com/watch?v=_sUak2xdxWQ",  # Slimane - La vie est belle (QUEL TITRE IRONIQUE)
+        "https://music.youtube.com/watch?v=Yudzx2GmbQw",  # Slimane - La recette (ENCORE CETTE MERDE)
+        "https://music.youtube.com/watch?v=9oDnPZV7nYc",  # Slimane - Bye Bye (OUI BYE BYE SLIMANE !)
+    ]
+    
+    # Créer un dossier temporaire pour le test
+    test_dir = Path("temp_premium_test")
+    test_dir.mkdir(exist_ok=True)
+    
+    try:
+        # Hook de progression silencieux pour le test (on veut pas voir le nom de Slimane !)
+        def silent_progress_hook(d):
+            pass  # On affiche rien, on veut pas voir cette merde de Slimane !
+        
+        # Configuration pour téléchargement RÉEL mais rapide et SILENCIEUX
+        test_opts = get_ultra_ydl_opts(str(test_dir))
+        test_opts.update({
+            'format': 'worst[ext=m4a]/worst[filesize<2M]/worst',  # Format encore plus petit
+            'postprocessors': [],  # Pas de conversion MP3 pour le test
+            'quiet': False,  # Voir les erreurs mais pas la progression
+            'ignoreerrors': False,  # IMPORTANT: Ne pas ignorer les erreurs Premium !
+            'progress_hooks': [silent_progress_hook],  # Hook silencieux pour masquer Slimane
+            # Timeouts ultra courts pour test rapide
+            'socket_timeout': 15,  # 15s au lieu de 60s
+            'fragment_retries': 2,  # 2 au lieu de 5
+            'retries': 2,  # 2 au lieu de 5
+            'file_access_retries': 2,  # 2 au lieu de 5
+            'logger': SilentLogger(),  # Désactive tous les logs yt-dlp pendant le test
+        })
+        
+        # Variables partagées pour les threads
+        premium_success_count = 0
+        premium_blocked_count = 0
+        test_lock = threading.Lock()
+        completed_tests = 0
+        
+        def test_single_url(test_url, test_num):
+            """Teste une seule URL Premium en thread séparé"""
+            nonlocal premium_success_count, premium_blocked_count, completed_tests
+            
+            try:
+                with yt_dlp.YoutubeDL(test_opts) as ydl:
+                    # VRAIMENT télécharger cette merde de Slimane (désolé mais c'est le seul moyen de tester Premium)
+                    # On déteste ce qu'on fait mais c'est pour la science !
+                    ydl.download([test_url])
+                    
+                    # Vérifier si un fichier a été téléchargé = Premium confirmé
+                    downloaded_files = list(test_dir.glob("*"))
+                    if downloaded_files:
+                        with test_lock:
+                            premium_success_count += 1
+                        
+                        # Supprimer ce fichier de merde immédiatement - on ne garde pas Slimane !
+                        for file in downloaded_files:
+                            try:
+                                file.unlink()  # BURN SLIMANE BURN! 🔥
+                            except:
+                                pass
+                        return True
+                    else:
+                        with test_lock:
+                            premium_blocked_count += 1
+                        return False
+                        
+            except:
+                # Toute erreur = pas Premium
+                with test_lock:
+                    premium_blocked_count += 1
+                return False
+        
+        # Lancer les tests en parallèle avec ThreadPoolExecutor
+        safe_print(f"   🚀 Lancement de {len(premium_test_urls)} tests simultanés...")
+        
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            # Lancer tous les tests en parallèle
+            futures = []
+            for i, test_url in enumerate(premium_test_urls, 1):
+                future = executor.submit(test_single_url, test_url, i)
+                futures.append(future)
+            
+            # Afficher la progression en temps réel
+            while completed_tests < len(premium_test_urls):
+                time.sleep(0.1)  # Check toutes les 100ms
+                current_completed = sum(1 for f in futures if f.done())
+                if current_completed > completed_tests:
+                    completed_tests = current_completed
+                    progress = (completed_tests / len(premium_test_urls)) * 100
+                    print(f"\r   📊 Progression: {completed_tests}/{len(premium_test_urls)} ({progress:.0f}%)", end='', flush=True)
+            
+            print()  # Nouvelle ligne après la progression
+            
+            # Collecter les résultats
+            results = []
+            for future in futures:
+                try:
+                    results.append(future.result())
+                except Exception:
+                    results.append(False)
+        
+        # Nettoyer le dossier de test
+        try:
+            for file in test_dir.glob("*"):
+                file.unlink()
+            test_dir.rmdir()
+        except:
+            pass
+        
+        # Plus d'explications dans les commentaires du code si besoin
+        
+        # Analyse des résultats RÉELS (avec la daube de Slimane malheureusement)
+        if premium_success_count > 0:
+            return True, f"✅ PREMIUM CONFIRMÉ ! Test réussi {premium_success_count}/{len(premium_test_urls)} fois"
+        
+        elif premium_blocked_count > 0:
+            return False, f"❌ PAS DE PREMIUM ! Contenu bloqué {premium_blocked_count}/{len(premium_test_urls)} fois"
+        
+        else:
+            return False, "❌ Test impossible - Erreur de connexion"
+            
+    except Exception as e:
+        # Nettoyer en cas d'erreur
+        try:
+            for file in test_dir.glob("*"):
+                file.unlink()
+            test_dir.rmdir()
+        except:
+            pass
+        return False, f"❌ Erreur critique lors du test: {str(e)[:50]}..."
 
 def download_single_video(video_info, output_dir, playlist_name):
     """Télécharge une seule vidéo avec gestion d'erreur optimisée"""
@@ -363,9 +532,10 @@ def download_playlist_ultra_fast(playlist_url, video_threads=8):
 
 def download_all_playlists_parallel(playlist_urls, playlist_threads=3, video_threads_per_playlist=6):
     """Télécharge toutes les playlists en parallèle"""
-    safe_print(f"🚀 DÉMARRAGE ULTRA-OPTIMISÉ")
-    safe_print(f"📊 {len(playlist_urls)} playlists, {playlist_threads} playlists simultanées")
-    safe_print(f"⚙️  {video_threads_per_playlist} threads vidéo par playlist")
+    with print_lock:
+        print(f"\033[92m🚀 DÉMARRAGE ULTRA-OPTIMISÉ\033[0m")
+        print(f"\033[94m📊 {len(playlist_urls)} playlists, {playlist_threads} playlists simultanées\033[0m")
+        print(f"\033[95m⚙️  {video_threads_per_playlist} threads vidéo par playlist\033[0m")
     
     global_stats.start_time = time.time()
     
@@ -381,11 +551,14 @@ def download_all_playlists_parallel(playlist_urls, playlist_threads=3, video_thr
             try:
                 result = future.result()
                 if result:
-                    safe_print(f"🎉 Playlist {playlist_num}/{len(playlist_urls)} terminée avec succès")
+                    with print_lock:
+                        print(f"\033[92m🎉 Playlist {playlist_num}/{len(playlist_urls)} terminée avec succès\033[0m")
                 else:
-                    safe_print(f"❌ Playlist {playlist_num}/{len(playlist_urls)} échouée")
+                    with print_lock:
+                        print(f"\033[91m❌ Playlist {playlist_num}/{len(playlist_urls)} échouée\033[0m")
             except Exception as e:
-                safe_print(f"❌ Erreur critique playlist {playlist_num}: {str(e)}")
+                with print_lock:
+                    print(f"\033[91m❌ Erreur critique playlist {playlist_num}: {str(e)}\033[0m")
                 logger.error(f"Erreur critique playlist {playlist_url}: {str(e)}")
 
 def print_final_stats():
@@ -393,24 +566,24 @@ def print_final_stats():
     playlists_done, playlists_total, videos_done, videos_failed, videos_total = global_stats.get_stats()
     elapsed = time.time() - global_stats.start_time
     
-    safe_print(f"\n{'='*60}")
-    safe_print(f"🎉 === STATISTIQUES FINALES ===")
-    safe_print(f"{'='*60}")
-    safe_print(f"📋 Playlists: {playlists_done}/{playlists_total} terminées")
-    safe_print(f"🎵 Vidéos: {videos_done}/{videos_total} réussies")
-    safe_print(f"❌ Échecs: {videos_failed}")
-    safe_print(f"⏱️  Temps total: {elapsed:.1f}s")
-    safe_print(f"🚀 Vitesse: {videos_done/elapsed:.2f} vidéos/seconde")
-    safe_print(f"💪 Efficacité: {(videos_done/videos_total)*100:.1f}%")
-    safe_print(f"{'='*60}")
+    safe_print(f"\n\033[95m{'='*60}\033[0m")
+    safe_print(f"\033[93m🎉 === STATISTIQUES FINALES ===\033[0m")
+    safe_print(f"\033[95m{'='*60}\033[0m")
+    safe_print(f"\033[94m📋 Playlists: {playlists_done}/{playlists_total} terminées\033[0m")
+    safe_print(f"\033[92m🎵 Vidéos: {videos_done}/{videos_total} réussies\033[0m")
+    safe_print(f"\033[91m❌ Échecs: {videos_failed}\033[0m")
+    safe_print(f"\033[94m⏱️  Temps total: {elapsed:.1f}s\033[0m")
+    safe_print(f"\033[95m🚀 Vitesse: {videos_done/elapsed:.2f} vidéos/seconde\033[0m")
+    safe_print(f"\033[92m💪 Efficacité: {(videos_done/videos_total)*100:.1f}%\033[0m")
+    safe_print(f"\033[95m{'='*60}\033[0m")
 
 def verify_playlists(playlist_urls):
     """Vérifie et affiche les informations des playlists avant téléchargement"""
-    print(f"\n🔍 === VÉRIFICATION DES PLAYLISTS ===")
+    print(f"\n\033[95m🔍 === VÉRIFICATION DES PLAYLISTS ===\033[0m")
     
     playlist_infos = []
     for i, url in enumerate(playlist_urls, 1):
-        print(f"📋 [{i}/{len(playlist_urls)}] Vérification en cours...")
+        print(f"\033[93m📋 [{i}/{len(playlist_urls)}] Vérification en cours...\033[0m")
         
         try:
             playlist_name, entries = extract_playlist_info_fast(url)
@@ -420,137 +593,178 @@ def verify_playlists(playlist_urls):
                     'name': playlist_name,
                     'count': len(entries)
                 })
-                print(f"✅ {playlist_name} ({len(entries)} vidéos)")
+                print(f"\033[92m✅ {playlist_name} ({len(entries)} vidéos)\033[0m")
             else:
-                print(f"❌ Playlist invalide ou vide: {url[:50]}...")
+                print(f"\033[91m❌ Playlist invalide ou vide: {url[:50]}...\033[0m")
                 
         except Exception as e:
-            print(f"❌ Erreur lors de la vérification: {str(e)[:50]}...")
+            print(f"\033[91m❌ Erreur lors de la vérification: {str(e)[:50]}...\033[0m")
     
     if not playlist_infos:
-        print("❌ Aucune playlist valide trouvée.")
+        print("\033[91m❌ Aucune playlist valide trouvée.\033[0m")
         return False, []
     
     # Affichage récapitulatif
-    print(f"\n📊 === RÉCAPITULATIF ===")
+    print(f"\n\033[95m📊 === RÉCAPITULATIF ===\033[0m")
     total_videos = 0
     
     for i, info in enumerate(playlist_infos, 1):
-        print(f"🎵 [{i}] {info['name']}")
-        print(f"    📹 {info['count']} vidéos")
-        print(f"    🔗 {info['url'][:60]}{'...' if len(info['url']) > 60 else ''}")
+        print(f"\033[92m🎵 [{i}] {info['name']}\033[0m")
+        print(f"\033[94m    📹 {info['count']} vidéos\033[0m")
+        print(f"\033[95m    🔗 {info['url'][:60]}{'...' if len(info['url']) > 60 else ''}\033[0m")
         total_videos += info['count']
         print()
     
-    print(f"📈 TOTAL: {len(playlist_infos)} playlists → {total_videos} vidéos")
+    print(f"\033[93m📈 TOTAL: {len(playlist_infos)} playlists → {total_videos} vidéos\033[0m")
     
     # Confirmation utilisateur
-    response = input("✅ Continuer le téléchargement ? (O/N): ").strip().lower()
+    response = input("\033[92m✅ Continuer le téléchargement ? (O/N): \033[0m").strip().lower()
     return response in ['o', 'oui', 'y', 'yes', ''], [info['url'] for info in playlist_infos]
 
 def cleanup_old_logs():
-    """Supprime les logs de plus de 7 jours pour éviter l'encombrement"""
+    """Garde seulement les 5 logs les plus récents (format DD_MM_YY_HHh_MM_SS)"""
     try:
         logs_path = Path("logs")
         if not logs_path.exists():
             return
             
-        cutoff_time = time.time() - (7 * 24 * 60 * 60)  # 7 jours en secondes
+        # Récupérer tous les logs ultra_download avec le nouveau format
+        log_files = list(logs_path.glob("ultra_download_*.log"))
         
-        for log_file in logs_path.glob("ultra_download_*.log"):
-            if log_file.stat().st_mtime < cutoff_time:
-                try:
-                    log_file.unlink()
-                    print(f"🧹 Log ancien supprimé: {log_file.name}")
-                except Exception:
-                    pass  # Ignore si on ne peut pas supprimer
+        if len(log_files) <= 5:
+            return  # Pas besoin de nettoyer
+            
+        # Trier par date de modification (plus récent en premier)
+        log_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+        
+        # Garder les 5 plus récents, supprimer le reste
+        logs_to_delete = log_files[5:]
+        
+        for log_file in logs_to_delete:
+            try:
+                log_file.unlink()
+                print(f"\033[93m🧹 Log ancien supprimé: {log_file.name}\033[0m")
+            except Exception:
+                pass  # Ignore si on ne peut pas supprimer
+                
+        if logs_to_delete:
+            print(f"\033[92m🗂️  Nettoyage terminé: {len(logs_to_delete)} anciens logs supprimés\033[0m")
+            print(f"\033[94m📁 {len(log_files) - len(logs_to_delete)} logs conservés\033[0m")
                     
-    except Exception:
+    except Exception as e:
+        print(f"\033[91m⚠️ Erreur lors du nettoyage des logs: {e}\033[0m")
         pass  # Ignore les erreurs de nettoyage
 
 def main():
     """Fonction principale ultra-optimisée"""
-    # Nettoyer les anciens logs au démarrage
-    cleanup_old_logs()
-    
-    print("🎵 === TÉLÉCHARGEUR YOUTUBE MUSIC ULTRA-OPTIMISÉ === 🎵")
+    # Écran de démarrage ULTRA STYLÉ
+    print("\033[95m" + "=" * 80)
+    print("██╗   ██╗██╗  ████████╗██████╗  █████╗     ██████╗  ██████╗ ██╗    ██╗███╗   ██╗██╗      ██████╗  █████╗ ██████╗ ███████╗██████╗ ")
+    print("██║   ██║██║  ╚══██╔══╝██╔══██╗██╔══██╗    ██╔══██╗██╔═══██╗██║    ██║████╗  ██║██║     ██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗")  
+    print("██║   ██║██║     ██║   ██████╔╝███████║    ██║  ██║██║   ██║██║ █╗ ██║██╔██╗ ██║██║     ██║   ██║███████║██║  ██║█████╗  ██████╔╝")
+    print("██║   ██║██║     ██║   ██╔══██╗██╔══██║    ██║  ██║██║   ██║██║███╗██║██║╚██╗██║██║     ██║   ██║██╔══██║██║  ██║██╔══╝  ██╔══██╗")
+    print("╚██████╔╝███████╗██║   ██║  ██║██║  ██║    ██████╔╝╚██████╔╝╚███╔███╔╝██║ ╚████║███████╗╚██████╔╝██║  ██║██████╔╝███████╗██║  ██║")
+    print(" ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝    ╚═════╝  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝")
+    print("\033[0m")
+    print("\033[96m" + "=" * 80 + "\033[0m")
     print()
-    print("⚡ PERFORMANCES MAXIMALES:")
-    print("   - Playlists téléchargées en parallèle")
-    print("   - Multithreading par playlist")
-    print("   - MP3 320kbps avec métadonnées")
-    print("   - Gestion intelligente des doublons")
-    print("   - Logging complet des erreurs")
-    print(f"📝 Logs de cette session: {log_filename}")
+    print("\033[93m🎵 YOUTUBE MUSIC DOWNLOADER - VERSION ULTRA-OPTIMISÉE 🎵\033[0m")
+    print("\033[92m" + "─" * 80 + "\033[0m")
+    print()
+    print("\033[91m⚡ PERFORMANCES MAXIMALES:\033[0m")
+    print("   \033[94m🚀 Playlists téléchargées en PARALLÈLE\033[0m")
+    print("   \033[94m🔥 Multithreading par playlist\033[0m") 
+    print("   \033[94m🎧 MP3 320kbps avec métadonnées COMPLÈTES\033[0m")
+    print("   \033[94m🧠 Gestion intelligente des doublons\033[0m")
+    print("   \033[94m📊 Logging complet des erreurs\033[0m")
+    print("   \033[94m🍪 Support Premium avec cookies\033[0m")
+    print()
+    time.sleep(3)  # Pause de 3 secondes pour profiter du beau ascii art et mon script kiddes :D XD
+    print(f"\033[95m📝 Logs de cette session: {log_filename}\033[0m")  
+    # Nettoyer les anciens logs après avoir affiché le nom du nouveau
+    cleanup_old_logs()
+    print("\033[95m" + "=" * 80)
     print()
     
     # Vérification des cookies d'authentification
     if Path('cookies.txt').exists():
-        print("🍪 Cookies YouTube détectés - Accès Premium activé")
-        logger.info("🍪 Cookies YouTube détectés et chargés pour l'authentification Premium")
+        print("\033[93m🍪 Cookies YouTube détectés - Test de l'accès Premium...\033[0m")
+        #logger.info("🍪 Cookies YouTube détectés et chargés pour l'authentification Premium")
+        
+        # Tester l'accès Premium
+        is_premium, message = test_premium_access()
+        print(f"   \033[94m{message}\033[0m")
+        
+        if is_premium:
+            print("\033[92m     ✅ Prêt pour télécharger du contenu Premium !\033[0m")
+            #logger.info("✅ Accès Premium confirmé par le test")
+        else:
+            print("\033[91m     ⚠️  Accès limité - Certaines chansons Premium pourraient échouer lors du téléchargement\033[0m")
+            logger.warning("❌ Test Premium échoué - Cookies peut-être expirés")
+            
     else:
-        print("ℹ️  Pas de cookies détectés - Certaines chansons Premium pourraient échouer")
-        print("📖 Consultez docs/COOKIES_GUIDE.md pour configurer l'accès Premium")
-        logger.info("ℹ️  Aucun fichier cookies.txt trouvé - Mode public uniquement")
+        print("\033[94mℹ️  Pas de cookies détectés - Certaines chansons Premium pourraient échouer\033[0m")
+        print("\033[95m📖 Consultez https://github.com/Felzow47/youtube-music-downloader/blob/main/docs/COOKIES_GUIDE.md pour configurer l'accès Premium\033[0m")
+        #logger.info("ℹ️  Aucun fichier cookies.txt trouvé - Mode public uniquement")
     print()
     
     # Saisie des URLs
-    print("📝 Collez vos URLs de playlists YouTube Music (séparées par des virgules):")
-    raw_input = input("🔗 URLs: ").strip()
+    print("\033[93m📝 Collez vos URLs de playlists YouTube Music (séparées par des virgules):\033[0m")
+    raw_input = input("\033[95m🔗 URLs: \033[0m").strip()
     
     if not raw_input:
-        print("❌ Aucune URL fournie.")
+        print("\033[91m❌ Aucune URL fournie.\033[0m")
         return
     
     playlist_urls = [url.strip() for url in raw_input.split(',') if url.strip()]
     
     if not playlist_urls:
-        print("❌ Aucune URL valide.")
+        print("\033[91m❌ Aucune URL valide.\033[0m")
         return
     
     # Vérification des playlists avec confirmation
     should_continue, validated_urls = verify_playlists(playlist_urls)
     
     if not should_continue:
-        print("⏹️  Téléchargement annulé.")
+        print("\033[93m⏹️  Téléchargement annulé.\033[0m")
         return
     
     if not validated_urls:
-        print("❌ Aucune playlist valide à télécharger.")
+        print("\033[91m❌ Aucune playlist valide à télécharger.\033[0m")
         return
     
-    print(f"\n📊 {len(validated_urls)} playlists validées")
+    print(f"\n\033[92m📊 {len(validated_urls)} playlists validées\033[0m")
     
     # Configuration avancée
     try:
-        playlist_threads = int(input("🔀 Playlists simultanées (recommandé 2-3): ") or "2")
+        playlist_threads = int(input("\033[95m🔀 Playlists simultanées (recommandé 2-3): \033[0m") or "2")
         playlist_threads = max(1, min(playlist_threads, 4))
     except ValueError:
         playlist_threads = 2
     
     try:
-        video_threads = int(input("⚙️  Threads vidéo par playlist (recommandé 6-8): ") or "6")
+        video_threads = int(input("\033[95m⚙️  Threads vidéo par playlist (recommandé 6-8): \033[0m") or "6")
         video_threads = max(1, min(video_threads, 12))
     except ValueError:
         video_threads = 6
     
-    print(f"\n🎯 Configuration finale:")
-    print(f"   - {len(validated_urls)} playlists")
-    print(f"   - {playlist_threads} playlists simultanées")
-    print(f"   - {video_threads} threads vidéo par playlist")
-    print(f"   - Capacité théorique: {playlist_threads * video_threads} téléchargements simultanés")
+    print(f"\n\033[93m🎯 Configuration finale:\033[0m")
+    print(f"\033[94m   - {len(validated_urls)} playlists\033[0m")
+    print(f"\033[94m   - {playlist_threads} playlists simultanées\033[0m")
+    print(f"\033[94m   - {video_threads} threads vidéo par playlist\033[0m")
+    print(f"\033[92m   - Capacité théorique: {playlist_threads * video_threads} téléchargements simultanés\033[0m")
     
-    input("⏯️  Appuyez sur Entrée pour lancer l'ultra-téléchargement...")
+    input("\033[95m⏯️  Appuyez sur Entrée pour lancer l'ultra-téléchargement...\033[0m")
     
     try:
         download_all_playlists_parallel(validated_urls, playlist_threads, video_threads)
         print_final_stats()
         
     except KeyboardInterrupt:
-        print("\n⏹️  Arrêt demandé par l'utilisateur")
+        print("\n\033[93m⏹️  Arrêt demandé par l'utilisateur\033[0m")
         print_final_stats()
     except Exception as e:
-        print(f"\n❌ Erreur critique: {str(e)}")
+        print(f"\n\033[91m❌ Erreur critique: {str(e)}\033[0m")
         logger.error(f"Erreur critique main: {str(e)}")
         print_final_stats()
 
