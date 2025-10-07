@@ -78,3 +78,13 @@ If you have a YouTube Premium subscription and want to download Premium-exclusiv
 ## Legal
 
 Respect copyrights and YouTube's terms of service.
+
+---
+
+## 🎉 Fork with graphical interface
+
+A user has created a fork of this project and added a graphical interface as well as other features (and probably coded better than me XD)!
+
+- Fork: [Blaze414/youtube-music-ultra-downloader](https://github.com/Blaze414/youtube-music-ultra-downloader)
+
+Feel free to check out their version if you want a more visual experience!

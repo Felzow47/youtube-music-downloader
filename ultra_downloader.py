@@ -32,11 +32,8 @@ file_handler.setLevel(logging.ERROR)
 file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 logger.addHandler(file_handler)
 
-# Handler pour console
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
-logger.addHandler(console_handler)
+# PAS de handler console - on veut seulement les logs dans le fichier
+# Les messages normaux seront affichés via print() pour un affichage propre
 
 # Logger pour yt-dlp (capture les erreurs internes)
 yt_dlp_logger = logging.getLogger("yt-dlp")
@@ -53,6 +50,10 @@ class SilentLogger:
 print_lock = threading.Lock()
 stats_lock = threading.Lock()
 
+# Dictionnaire pour stocker les lignes de progression actives
+active_downloads = {}
+download_lock = threading.Lock()
+
 class GlobalStats:
     """Statistiques globales thread-safe"""
     def __init__(self):
@@ -62,27 +63,33 @@ class GlobalStats:
         self.videos_completed = 0
         self.videos_failed = 0
         self.start_time = None
-        
+        self.failed_videos_by_playlist = {}  # Dict: playlist_name -> [failed_videos]
+
     def add_playlist(self, video_count):
         with stats_lock:
             self.playlists_total += 1
             self.videos_total += video_count
-    
+
     def complete_playlist(self):
         with stats_lock:
             self.playlists_completed += 1
-    
+
     def add_video_success(self):
         with stats_lock:
             self.videos_completed += 1
-    
+
     def add_video_failure(self):
         with stats_lock:
             self.videos_failed += 1
-    
+
+    def add_failed_videos(self, playlist_name, failed_videos):
+        with stats_lock:
+            if failed_videos:
+                self.failed_videos_by_playlist[playlist_name] = failed_videos
+
     def get_stats(self):
         with stats_lock:
-            return (self.playlists_completed, self.playlists_total, 
+            return (self.playlists_completed, self.playlists_total,
                    self.videos_completed, self.videos_failed, self.videos_total)
 
 global_stats = GlobalStats()
@@ -94,15 +101,21 @@ def safe_print(message):
         print(f"[{timestamp}] {message}")
 
 def progress_hook(d):
-    """Hook de progression avec pourcentages"""
+    """Hook de progression simple - une ligne par téléchargement"""
     if d['status'] == 'downloading':
-        percent = d.get('_percent_str', 'N/A').strip()
-        speed = d.get('_speed_str', 'N/A').strip()
-        filename = os.path.basename(d.get('filename', 'Unknown'))
-        print(f"\r📥 {filename[:30]}... {percent} à {speed}", end='', flush=True)
-    elif d['status'] == 'finished':
-        filename = os.path.basename(d.get('filename', 'Unknown'))
-        print(f"\n✅ Fini: {filename[:40]}...")
+        try:
+            percent = d.get('_percent_str', 'N/A').strip()
+            speed = d.get('_speed_str', 'N/A').strip()
+            filename = os.path.basename(d.get('filename', 'Unknown'))[:40]
+
+            # Afficher uniquement toutes les 5% pour éviter spam
+            if percent != 'N/A':
+                percent_num = float(percent.replace('%', ''))
+                if int(percent_num) % 5 == 0:
+                    with print_lock:
+                        print(f"📥 {filename}... {percent:>6} à {speed:>12}")
+        except:
+            pass
 
 def clean_filename(title):
     """Nettoie un titre pour en faire un nom de fichier sûr"""
@@ -142,8 +155,7 @@ def cleanup_temp_files(output_path, mp3_filename):
                 base_name.lower()[:20] == temp_base.lower()[:20]):
                 
                 try:
-                    temp_file.unlink()  # Supprimer le fichier
-                    safe_print(f"🧹 Nettoyé: {temp_file.name}")
+                    temp_file.unlink()  # Supprimer le fichier silencieusement
                 except Exception as e:
                     logger.error(f"Erreur suppression {temp_file}: {e}")
                     
@@ -151,51 +163,48 @@ def cleanup_temp_files(output_path, mp3_filename):
         logger.error(f"Erreur nettoyage temporaires: {e}")
 
 def get_ultra_ydl_opts(output_dir):
-    """Configuration ultra-optimisée pour yt-dlp"""
+    """Configuration ultra-optimisée pour yt-dlp - VITESSE MAXIMALE"""
     opts = {
-        # Format audio optimal
-        'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
-        
-        # Post-processing pour MP3 320kbps
+        # Format audio optimal - préférer m4a (plus rapide, pas de réencodage nécessaire)
+        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+
+        # Post-processing pour MP3 320kbps ULTRA-RAPIDE
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '320',
-        }, {
-            'key': 'FFmpegMetadata',
-            'add_metadata': True,
         }],
-        
+
         # Supprimer les fichiers temporaires après conversion
-        'keepvideo': False,  # Ne pas garder la vidéo originale
-        'keep_video': False,  # Alternative pour certaines versions
-        
+        'keepvideo': False,
+        'keep_video': False,
+
         # Template de sortie standard (yt-dlp gère les caractères interdits automatiquement)
         'outtmpl': os.path.join(output_dir, '%(title).100s.%(ext)s'),
-        
-        # Options de performance maximales
-        'concurrent_fragment_downloads': 8,  # Plus de fragments parallèles
-        'fragment_retries': 5,
-        'retries': 5,
-        'file_access_retries': 5,
-        'retry_sleep_functions': {'http': lambda n: min(4 * (2 ** n), 30)},
-        
-        # Optimisations réseau
-        'socket_timeout': 60,
-        'http_chunk_size': 16777216,  # 16MB chunks
-        'buffersize': 16384,
-        
-        # Gestion des erreurs
+
+        # Options de performance MAXIMALES - TURBO MODE
+        'concurrent_fragment_downloads': 16,  # 16 fragments parallèles (doublé!)
+        'fragment_retries': 3,  # Réduit de 5 à 3 pour ne pas perdre de temps
+        'retries': 3,  # Réduit de 5 à 3
+        'file_access_retries': 3,  # Réduit de 5 à 3
+        'retry_sleep_functions': {'http': lambda n: min(2 * (2 ** n), 15)},  # Retry plus rapide
+
+        # Optimisations réseau TURBO
+        'socket_timeout': 30,  # Réduit de 60 à 30s - ne pas attendre trop longtemps
+        'http_chunk_size': 33554432,  # 32MB chunks (doublé!) pour télécharger plus gros morceaux
+        'buffersize': 32768,  # Buffer doublé
+
+        # Gestion des erreurs - fail fast
         'ignoreerrors': True,
-        'no_warnings': False,  # Activer les warnings pour le debug
+        'no_warnings': True,  # Désactiver les warnings pour gagner du temps
         'extract_flat': False,
-        
+
         # Logger personnalisé pour capturer toutes les erreurs
         'logger': logger,
-        
+
         # Hook de progression pour afficher les pourcentages
         'progress_hooks': [progress_hook],
-        
+
     }
     
     # Ajouter les cookies si le fichier existe
@@ -226,7 +235,7 @@ def test_premium_access():
     if not Path('cookies.txt').exists():
         return False, "❌ Aucun fichier cookies.txt trouvé"
     
-    safe_print("🔍 Test de l'accès Premium en cours...")
+    
     
     # URLs de test Premium-only - ATTENTION : C'EST DU SLIMANE ! 🤮
     # JE DÉTESTE cette merde de Slimane mais c'est le seul moyen de tester Premium
@@ -303,17 +312,19 @@ def test_premium_access():
                 with test_lock:
                     premium_blocked_count += 1
                 return False
-        
+
         # Lancer les tests en parallèle avec ThreadPoolExecutor
-        safe_print(f"   🚀 Lancement de {len(premium_test_urls)} tests simultanés...")
-        
+        # Affichage coloré sans horodatage pour les tests Premium
+        print(f"\033[92m🚀 Lancement de {len(premium_test_urls)} tests simultanés...\033[0m")
+        print("  \033[96m🔍 Test de l'accès Premium en cours...\033[0m")
+
         with ThreadPoolExecutor(max_workers=4) as executor:
             # Lancer tous les tests en parallèle
             futures = []
             for i, test_url in enumerate(premium_test_urls, 1):
                 future = executor.submit(test_single_url, test_url, i)
                 futures.append(future)
-            
+
             # Afficher la progression en temps réel
             while completed_tests < len(premium_test_urls):
                 time.sleep(0.1)  # Check toutes les 100ms
@@ -322,9 +333,9 @@ def test_premium_access():
                     completed_tests = current_completed
                     progress = (completed_tests / len(premium_test_urls)) * 100
                     print(f"\r   📊 Progression: {completed_tests}/{len(premium_test_urls)} ({progress:.0f}%)", end='', flush=True)
-            
+
             print()  # Nouvelle ligne après la progression
-            
+
             # Collecter les résultats
             results = []
             for future in futures:
@@ -332,7 +343,7 @@ def test_premium_access():
                     results.append(future.result())
                 except Exception:
                     results.append(False)
-        
+
         # Nettoyer le dossier de test
         try:
             for file in test_dir.glob("*"):
@@ -364,13 +375,13 @@ def test_premium_access():
         return False, f"❌ Erreur critique lors du test: {str(e)[:50]}..."
 
 def download_single_video(video_info, output_dir, playlist_name):
-    """Télécharge une seule vidéo avec gestion d'erreur optimisée"""
+    """Télécharge une seule vidéo avec gestion d'erreur optimisée et vérification ultra-rapide du MP3 généré"""
     video_id = video_info.get('id')
     title = video_info.get('title', 'Unknown')[:50]
     url = f"https://www.youtube.com/watch?v={video_id}"
-    
-    # Vérifier si le fichier existe déjà (méthode sécurisée sans glob)
+
     output_path = Path(output_dir)
+    # Vérifier si le fichier existe déjà (méthode sécurisée sans glob)
     if output_path.exists():
         # Créer plusieurs variantes du titre pour la correspondance
         title_variants = [
@@ -381,83 +392,76 @@ def download_single_video(video_info, output_dir, playlist_name):
             title.replace('*', '_'),  # Astérisques remplacées par underscore
             "".join(c for c in title if c.isalnum() or c in (' ', '-', '_', '.')).strip()  # Complètement sanitizé
         ]
-        
-        # Chercher des fichiers existants qui correspondent à une des variantes
         for existing_file in output_path.iterdir():
             if existing_file.suffix.lower() == '.mp3':
                 file_stem_lower = existing_file.stem.lower()
-                # Tester chaque variante du titre
                 for variant in title_variants:
-                    if variant and file_stem_lower.startswith(variant.lower()[:30]):  # Limiter à 30 chars pour éviter les titres trop longs
+                    if variant and file_stem_lower.startswith(variant.lower()[:30]):
                         global_stats.add_video_success()
                         return True
-    
+
+    # Utiliser un hook pour récupérer le nom du fichier MP3 final
+    final_mp3 = {'filename': None}
+
+    def mp3_postprocessor_hook(d):
+        """Hook appelé après la conversion MP3"""
+        if d['status'] == 'finished':
+            final_mp3['filename'] = d.get('info_dict', {}).get('filepath') or d.get('filepath')
+
+    def progress_final_hook(d):
+        """Hook pour capturer le fichier final téléchargé"""
+        if d['status'] == 'finished':
+            if not final_mp3['filename']:
+                final_mp3['filename'] = d.get('filename')
+
     ydl_opts = get_ultra_ydl_opts(output_dir)
-    
+    ydl_opts = dict(ydl_opts)  # Copie défensive
+    ydl_opts['postprocessor_hooks'] = [mp3_postprocessor_hook]
+    # Garder le progress_hook d'origine + ajouter progress_final_hook
+    ydl_opts['progress_hooks'] = [progress_hook, progress_final_hook]
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        
-        # Vérifier que le fichier MP3 final existe vraiment dans le dossier
-        output_path = Path(output_dir)
-        mp3_found = False
-        found_file_name = ""
-        
-        if output_path.exists():
-            # Nettoyer le titre pour la comparaison
-            clean_title = clean_filename(title).lower()
-            original_title = title.lower()
-            
-            # Chercher les fichiers MP3 dans le dossier
+
+        mp3_file_path = None
+        if final_mp3['filename']:
+            mp3_file_path = Path(final_mp3['filename'])
+        else:
+            # Fallback : essayer de retrouver le fichier par titre si le hook n'a pas marché
             for mp3_file in output_path.glob("*.mp3"):
-                file_stem = mp3_file.stem.lower()
-                
-                # Tester plusieurs correspondances possibles
-                if (clean_title in file_stem or 
-                    file_stem.startswith(clean_title[:20]) or
-                    original_title[:20] in file_stem or
-                    file_stem.startswith(original_title[:20])):
-                    mp3_found = True
-                    found_file_name = mp3_file.name
+                if clean_filename(title).lower() in mp3_file.stem.lower():
+                    mp3_file_path = mp3_file
                     break
-        
-        if mp3_found:
-            # Nettoyer les fichiers .m4a temporaires qui correspondent à ce MP3
-            cleanup_temp_files(output_path, found_file_name)
-            
+
+        if mp3_file_path and mp3_file_path.exists():
+            # MP3 validé
+            file_size = mp3_file_path.stat().st_size / (1024 * 1024)
+            with print_lock:
+                print(f"✅ MP3 validé: {mp3_file_path.name[:50]} ({file_size:.1f} MB)")
+
+            try:
+                cleanup_temp_files(output_path, mp3_file_path.name)
+            except:
+                pass
             global_stats.add_video_success()
-            safe_print(f"✅ MP3 confirmé: {found_file_name}")
             return True
         else:
             global_stats.add_video_failure()
-            error_msg = f"[{playlist_name}] Fichier MP3 non trouvé après téléchargement: {title}"
-            logger.error(error_msg)
-            safe_print(f"❌ {error_msg}")
-            
-            # Debug: lister les fichiers MP3 présents dans le dossier
-            if output_path.exists():
-                mp3_files = list(output_path.glob("*.mp3"))
-                if mp3_files:
-                    logger.error(f"[{playlist_name}] Fichiers MP3 présents: {[f.name for f in mp3_files[-3:]]}")  # Les 3 derniers
-            
+            with print_lock:
+                print(f"❌ Échec validation MP3: {title[:50]}")
+            logger.error(f"[{playlist_name}] MP3 non trouvé: {title}")
             return False
-        
+
     except Exception as e:
         global_stats.add_video_failure()
-        
-        # Identifier les erreurs spécifiques
         error_str = str(e).lower()
         if "music premium members" in error_str or "premium members" in error_str:
-            error_msg = f"[{playlist_name}] 🔒 PREMIUM REQUIS: {title}"
-            safe_print(f"🔒 {title} → Nécessite YouTube Music Premium")
+            logger.error(f"[{playlist_name}] PREMIUM REQUIS: {title}")
         elif "private" in error_str or "unavailable" in error_str:
-            error_msg = f"[{playlist_name}] 🚫 INDISPONIBLE: {title}"
-            safe_print(f"🚫 {title} → Vidéo privée ou supprimée")
+            logger.error(f"[{playlist_name}] INDISPONIBLE: {title}")
         else:
-            error_msg = f"[{playlist_name}] ❌ ERREUR: {title} - {str(e)}"
-            safe_print(f"❌ {error_msg}")
-        
-        logger.error(error_msg)
+            logger.error(f"[{playlist_name}] ERREUR: {title} - {str(e)}")
         return False
 
 def extract_playlist_info_fast(playlist_url):
@@ -508,26 +512,41 @@ def download_playlist_ultra_fast(playlist_url, video_threads=8):
     
     global_stats.add_playlist(len(entries))
     safe_print(f"🎵 [{playlist_name}] Démarrage: {len(entries)} titres, {video_threads} threads")
-    
+
     success_count = 0
-    
-    # Téléchargement parallèle des vidéos
+    completed_count = 0
+
+    # Téléchargement parallèle - seulement barres individuelles
     with ThreadPoolExecutor(max_workers=video_threads) as executor:
-        futures = []
+        futures = {}
         for video_info in entries:
             future = executor.submit(download_single_video, video_info, output_dir, playlist_name)
-            futures.append(future)
-        
-        # Collecter les résultats
+            futures[future] = video_info.get('title', 'Unknown')[:50]
+
+        # Collecter les résultats silencieusement
+        failed_videos = []
         for future in as_completed(futures):
+            video_title = futures[future]
             try:
                 if future.result():
                     success_count += 1
+                else:
+                    failed_videos.append(video_title)
             except Exception as e:
-                logger.error(f"[{playlist_name}] Exception dans future: {str(e)}")
-    
+                failed_videos.append(video_title)
+                logger.error(f"[{playlist_name}] Exception: {str(e)}")
+
+    print()  # Saut de ligne après les téléchargements
+
+    # Vérifier RÉELLEMENT les MP3 dans le dossier
+    actual_mp3_files = list(output_dir.glob("*.mp3"))
+    actual_mp3_count = len(actual_mp3_files)
+
     global_stats.complete_playlist()
-    safe_print(f"✅ [{playlist_name}] Terminé: {success_count}/{len(entries)} réussis")
+
+    # Sauvegarder les infos pour les stats finales
+    global_stats.add_failed_videos(playlist_name, failed_videos)
+
     return True
 
 def download_all_playlists_parallel(playlist_urls, playlist_threads=3, video_threads_per_playlist=6):
@@ -562,10 +581,10 @@ def download_all_playlists_parallel(playlist_urls, playlist_threads=3, video_thr
                 logger.error(f"Erreur critique playlist {playlist_url}: {str(e)}")
 
 def print_final_stats():
-    """Affiche les statistiques finales"""
+    """Affiche les statistiques finales avec musiques manquantes"""
     playlists_done, playlists_total, videos_done, videos_failed, videos_total = global_stats.get_stats()
     elapsed = time.time() - global_stats.start_time
-    
+
     safe_print(f"\n\033[95m{'='*60}\033[0m")
     safe_print(f"\033[93m🎉 === STATISTIQUES FINALES ===\033[0m")
     safe_print(f"\033[95m{'='*60}\033[0m")
@@ -575,6 +594,18 @@ def print_final_stats():
     safe_print(f"\033[94m⏱️  Temps total: {elapsed:.1f}s\033[0m")
     safe_print(f"\033[95m🚀 Vitesse: {videos_done/elapsed:.2f} vidéos/seconde\033[0m")
     safe_print(f"\033[92m💪 Efficacité: {(videos_done/videos_total)*100:.1f}%\033[0m")
+
+    # Afficher les musiques manquantes par playlist
+    if global_stats.failed_videos_by_playlist:
+        safe_print(f"\n\033[91m📋 Musiques manquantes:\033[0m")
+        for playlist_name, failed_videos in global_stats.failed_videos_by_playlist.items():
+            if failed_videos:
+                safe_print(f"\033[93m[{playlist_name}]\033[0m")
+                for i, failed_title in enumerate(failed_videos, 1):
+                    safe_print(f"\033[91m  {i}. {failed_title}\033[0m")
+                safe_print("")
+        safe_print(f"\033[96m💡 Détails des erreurs dans: logs/{log_filename}\033[0m")
+
     safe_print(f"\033[95m{'='*60}\033[0m")
 
 def verify_playlists(playlist_urls):

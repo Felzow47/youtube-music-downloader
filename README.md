@@ -78,3 +78,13 @@ Si vous avez un abonnement YouTube Premium et voulez télécharger des chansons 
 ## Légal
 
 Respectez les droits d'auteur et les conditions d'utilisation de YouTube.
+
+---
+
+## 🎉 Fork avec interface graphique
+
+Un utilisateur a créé un fork de ce projet et y a ajouté une interface graphique ainsi que d'autres fonctionnalités (et probalement mieux codé que moi XD ) !
+
+- Fork : [Blaze414/youtube-music-ultra-downloader](https://github.com/Blaze414/youtube-music-ultra-downloader)
+
+N'hésitez pas à aller voir leur version si vous cherchez une expérience plus visuelle !
