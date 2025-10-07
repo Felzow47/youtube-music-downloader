@@ -4,7 +4,7 @@
 
 J'en avais marre d'attendre des heures pour télécharger mes playlists, alors j'ai fait ce script.
 
-## Ce que ça fait
+## A propos
 
 - Télécharge plusieurs playlists en même temps
 - Utilise du multithreading pour aller plus vite
@@ -75,11 +75,7 @@ Si vous avez un abonnement YouTube Premium et voulez télécharger des chansons 
 - 6-8 threads par playlist
 - Ne pas abuser sinon YouTube vous limite
 
-## Légal
-
-Respectez les droits d'auteur et les conditions d'utilisation de YouTube.
-
----
+--
 
 ## 🎉 Fork avec interface graphique
 
@@ -88,3 +84,12 @@ Un utilisateur a créé un fork de ce projet et y a ajouté une interface graphi
 - Fork : [Blaze414/youtube-music-ultra-downloader](https://github.com/Blaze414/youtube-music-ultra-downloader)
 
 N'hésitez pas à aller voir leur version si vous cherchez une expérience plus visuelle !
+
+---
+
+
+## Légal
+
+Respectez les droits d'auteur et les conditions d'utilisation de YouTube.
+
+
