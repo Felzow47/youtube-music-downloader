@@ -182,19 +182,16 @@ def get_ultra_ydl_opts(output_dir):
         # Template de sortie standard (yt-dlp gère les caractères interdits automatiquement)
         'outtmpl': os.path.join(output_dir, '%(title).100s.%(ext)s'),
 
-        # Options de performance MAXIMALES - TURBO MODE
-        'concurrent_fragment_downloads': 16,  # 16 fragments parallèles (doublé!)
-        'fragment_retries': 3,  # Réduit de 5 à 3 pour ne pas perdre de temps
-        'retries': 3,  # Réduit de 5 à 3
-        'file_access_retries': 3,  # Réduit de 5 à 3
-        'retry_sleep_functions': {'http': lambda n: min(2 * (2 ** n), 15)},  # Retry plus rapide
+        # Options de performance - MODE SIMPLE ET FIABLE
+        # PAS de concurrent_fragment_downloads - on laisse yt-dlp gérer tout seul !
+        'retries': 5,
+        'fragment_retries': 5,
+        'file_access_retries': 5,
 
-        # Optimisations réseau TURBO
-        'socket_timeout': 30,  # Réduit de 60 à 30s - ne pas attendre trop longtemps
-        'http_chunk_size': 33554432,  # 32MB chunks (doublé!) pour télécharger plus gros morceaux
-        'buffersize': 32768,  # Buffer doublé
+        # Timeouts raisonnables
+        'socket_timeout': 60,
 
-        # Gestion des erreurs - fail fast
+        # Gestion des erreurs
         'ignoreerrors': True,
         'no_warnings': True,  # Désactiver les warnings pour gagner du temps
         'extract_flat': False,
@@ -248,8 +245,10 @@ def test_premium_access():
         "https://music.youtube.com/watch?v=9oDnPZV7nYc",  # Slimane - Bye Bye (OUI BYE BYE SLIMANE !)
     ]
     
-    # Créer un dossier temporaire pour le test
-    test_dir = Path("temp_premium_test")
+    # Créer un dossier temporaire pour le test dans downloads/
+    downloads_dir = Path("downloads")
+    downloads_dir.mkdir(exist_ok=True)
+    test_dir = downloads_dir / "temp_premium_test"
     test_dir.mkdir(exist_ok=True)
     
     try:
@@ -257,21 +256,34 @@ def test_premium_access():
         def silent_progress_hook(d):
             pass  # On affiche rien, on veut pas voir cette merde de Slimane !
         
-        # Configuration pour téléchargement RÉEL mais rapide et SILENCIEUX
-        test_opts = get_ultra_ydl_opts(str(test_dir))
-        test_opts.update({
-            'format': 'worst[ext=m4a]/worst[filesize<2M]/worst',  # Format encore plus petit
+        # Configuration pour téléchargement ULTRA RAPIDE - Juste 5s dans la pire qualité !
+        # et LOGS SILENCIEUX (on ne veut rien voir d'ffmpeg/yt-dlp)
+        test_opts = {
+            'format': 'worstaudio[acodec=opus]/worstaudio/worst',  # Pire qualité possible (Opus = plus petit)
             'postprocessors': [],  # Pas de conversion MP3 pour le test
-            'quiet': False,  # Voir les erreurs mais pas la progression
+            'outtmpl': os.path.join(str(test_dir), '%(title).50s.%(ext)s'),
+            # Silence total côté yt-dlp
+            'quiet': True,
+            'no_warnings': True,
+            'noprogress': True,
+            # Éviter ffmpeg pour le HLS (beaucoup plus silencieux)
+            'hls_prefer_native': True,
+            # Si jamais ffmpeg est utilisé, le mettre en mode silencieux
+            'external_downloader_args': {
+                'ffmpeg': ['-loglevel', 'error', '-hide_banner', '-nostats']
+            },
             'ignoreerrors': False,  # IMPORTANT: Ne pas ignorer les erreurs Premium !
-            'progress_hooks': [silent_progress_hook],  # Hook silencieux pour masquer Slimane
-            # Timeouts ultra courts pour test rapide
-            'socket_timeout': 15,  # 15s au lieu de 60s
-            'fragment_retries': 2,  # 2 au lieu de 5
-            'retries': 2,  # 2 au lieu de 5
-            'file_access_retries': 2,  # 2 au lieu de 5
-            'logger': SilentLogger(),  # Désactive tous les logs yt-dlp pendant le test
-        })
+            'progress_hooks': [silent_progress_hook],
+            'cookiefile': 'cookies.txt' if Path('cookies.txt').exists() else None,
+            # Timeouts ultra courts
+            'socket_timeout': 10,  # Réduit à 10s
+            'retries': 1,  # Une seule tentative
+            'fragment_retries': 1,
+            'file_access_retries': 1,
+            'logger': SilentLogger(),
+            # TÉLÉCHARGER SEULEMENT 5 SECONDES ! (au lieu de 10)
+            'download_ranges': lambda info_dict, ydl: [{'start_time': 0, 'end_time': 5}],
+        }
         
         # Variables partagées pour les threads
         premium_success_count = 0
@@ -295,10 +307,10 @@ def test_premium_access():
                         with test_lock:
                             premium_success_count += 1
                         
-                        # Supprimer ce fichier de merde immédiatement - on ne garde pas Slimane !
+                        # BURN SLIMANE BURN! 🔥🔥🔥 On supprime cette MERDE immédiatement !
                         for file in downloaded_files:
                             try:
-                                file.unlink()  # BURN SLIMANE BURN! 🔥
+                                file.unlink()  # 💀 RIP SLIMANE �
                             except:
                                 pass
                         return True
@@ -312,11 +324,19 @@ def test_premium_access():
                 with test_lock:
                     premium_blocked_count += 1
                 return False
+            finally:
+                # Afficher la progression immédiatement après chaque test (sur la ligne du bas)
+                with test_lock:
+                    completed_tests += 1
+                    progress = (completed_tests / len(premium_test_urls)) * 100
+                    # Mettre à jour la ligne de progression (on est déjà sur la bonne ligne)
+                    print(f"\r   📊 Progression: {completed_tests}/{len(premium_test_urls)} ({progress:.0f}%)        ", end='', flush=True)
 
         # Lancer les tests en parallèle avec ThreadPoolExecutor
         # Affichage coloré sans horodatage pour les tests Premium
         print(f"\033[92m🚀 Lancement de {len(premium_test_urls)} tests simultanés...\033[0m")
-        print("  \033[96m🔍 Test de l'accès Premium en cours...\033[0m")
+        print(f"   \033[96m🔍 Test en cours\033[0m", end='', flush=True)  # Ligne des points (au-dessus)
+        print(f"\n   \033[96m📊 Progression: 0/{len(premium_test_urls)} (0%)\033[0m", end='', flush=True)  # Ligne de progression (en-dessous)
 
         with ThreadPoolExecutor(max_workers=4) as executor:
             # Lancer tous les tests en parallèle
@@ -324,33 +344,34 @@ def test_premium_access():
             for i, test_url in enumerate(premium_test_urls, 1):
                 future = executor.submit(test_single_url, test_url, i)
                 futures.append(future)
+            
+            # Afficher des points d'attente sur la première ligne
+            dots = 0
+            while completed_tests == 0:  # Arrêter dès que le premier test termine
+                time.sleep(0.3)
+                dots = (dots + 1) % 4
+                # Remonter d'une ligne, afficher les points, redescendre
+                print(f"\033[F\r   \033[96m🔍 Test en cours{'.' * dots}{' ' * (3 - dots)}\033[0m\n", end='', flush=True)
+            
+            # Quand les tests sont finis, remplacer la ligne des points par "Test terminé"
+            print(f"\033[F\r   \033[92m✅ Tests terminés{' ' * 20}\033[0m\n", end='', flush=True)
 
-            # Afficher la progression en temps réel
-            while completed_tests < len(premium_test_urls):
-                time.sleep(0.1)  # Check toutes les 100ms
-                current_completed = sum(1 for f in futures if f.done())
-                if current_completed > completed_tests:
-                    completed_tests = current_completed
-                    progress = (completed_tests / len(premium_test_urls)) * 100
-                    print(f"\r   📊 Progression: {completed_tests}/{len(premium_test_urls)} ({progress:.0f}%)", end='', flush=True)
+            # Attendre que tous les tests se terminent
+            for future in futures:
+                try:
+                    future.result()
+                except Exception:
+                    pass
 
             print()  # Nouvelle ligne après la progression
 
-            # Collecter les résultats
-            results = []
-            for future in futures:
-                try:
-                    results.append(future.result())
-                except Exception:
-                    results.append(False)
-
-        # Nettoyer le dossier de test
+        # Nettoyer le dossier de test - BURN IT ALL! 🔥
         try:
             for file in test_dir.glob("*"):
-                file.unlink()
+                file.unlink()  # 💀 Toute trace de Slimane doit disparaître ! 💀
             test_dir.rmdir()
         except:
-            pass
+            pass  # On ignore les erreurs, l'important c'est de tuer Slimane !
         
         # Plus d'explications dans les commentaires du code si besoin
         
@@ -359,7 +380,7 @@ def test_premium_access():
             return True, f"✅ PREMIUM CONFIRMÉ ! Test réussi {premium_success_count}/{len(premium_test_urls)} fois"
         
         elif premium_blocked_count > 0:
-            return False, f"❌ PAS DE PREMIUM ! Contenu bloqué {premium_blocked_count}/{len(premium_test_urls)} fois"
+            return False, f"\033[91m❌ PAS DE PREMIUM ! Contenu bloqué {premium_blocked_count}/{len(premium_test_urls)} fois\033[0m"
         
         else:
             return False, "❌ Test impossible - Erreur de connexion"
@@ -374,8 +395,12 @@ def test_premium_access():
             pass
         return False, f"❌ Erreur critique lors du test: {str(e)[:50]}..."
 
-def download_single_video(video_info, output_dir, playlist_name):
-    """Télécharge une seule vidéo avec gestion d'erreur optimisée et vérification ultra-rapide du MP3 généré"""
+def download_single_video(video_info, output_dir, playlist_name, retry_count=0):
+    """Télécharge une seule vidéo avec gestion d'erreur optimisée et vérification ultra-rapide du MP3 généré
+    
+    Args:
+        retry_count: Nombre de tentatives (0 = première tentative, utilisé pour le backoff)
+    """
     video_id = video_info.get('id')
     title = video_info.get('title', 'Unknown')[:50]
     url = f"https://www.youtube.com/watch?v={video_id}"
@@ -419,16 +444,25 @@ def download_single_video(video_info, output_dir, playlist_name):
     ydl_opts['postprocessor_hooks'] = [mp3_postprocessor_hook]
     # Garder le progress_hook d'origine + ajouter progress_final_hook
     ydl_opts['progress_hooks'] = [progress_hook, progress_final_hook]
+    
+    # Ajuster les timeouts selon le nombre de tentatives (backoff progressif)
+    if retry_count > 0:
+        ydl_opts['socket_timeout'] = 60 + (retry_count * 30)  # 60s, 90s, 120s...
+        ydl_opts['fragment_retries'] = 5 + retry_count  # Plus de retries
+        ydl_opts['retries'] = 5 + retry_count
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            info = ydl.download([url])
+            
+        # DEBUG: Attendre un peu que FFmpeg finisse la conversion
+        time.sleep(1)
 
         mp3_file_path = None
         if final_mp3['filename']:
             mp3_file_path = Path(final_mp3['filename'])
         else:
-            # Fallback : essayer de retrouver le fichier par titre si le hook n'a pas marché
+            # Fallback : essayer de retrouver le fichier par titre si le hook n'a pas marché
             for mp3_file in output_path.glob("*.mp3"):
                 if clean_filename(title).lower() in mp3_file.stem.lower():
                     mp3_file_path = mp3_file
@@ -447,19 +481,48 @@ def download_single_video(video_info, output_dir, playlist_name):
             global_stats.add_video_success()
             return True
         else:
+            # DEBUG: Chercher les fichiers .part pour voir ce qui reste
+            part_files = list(output_path.glob("*.part"))
+            mp4_files = list(output_path.glob("*.mp4"))
+            
             global_stats.add_video_failure()
             with print_lock:
                 print(f"❌ Échec validation MP3: {title[:50]}")
-            logger.error(f"[{playlist_name}] MP3 non trouvé: {title}")
+                if part_files:
+                    print(f"   ⚠️  {len(part_files)} fichiers .part trouvés (téléchargement incomplet)")
+                if mp4_files:
+                    print(f"   ⚠️  {len(mp4_files)} fichiers .mp4 trouvés (conversion échouée?)")
+                    
+            logger.error(f"[{playlist_name}] MP3 non trouvé: {title} - .part={len(part_files)}, .mp4={len(mp4_files)}")
             return False
 
     except Exception as e:
-        global_stats.add_video_failure()
         error_str = str(e).lower()
+        
+        # FALLBACK AUTOMATIQUE EN CAS DE TIMEOUT
+        if ("timeout" in error_str or "timed out" in error_str or 
+            "unable to download" in error_str or "http error 429" in error_str or
+            "too many requests" in error_str) and retry_count < 3:
+            
+            # Attendre avant de réessayer (backoff exponentiel)
+            wait_time = 5 * (2 ** retry_count)  # 5s, 10s, 20s
+            with print_lock:
+                print(f"⏳ Timeout détecté pour {title[:30]}... Attente {wait_time}s puis nouvelle tentative ({retry_count + 1}/3)")
+            time.sleep(wait_time)
+            
+            # RETRY RÉCURSIF avec backoff
+            return download_single_video(video_info, output_dir, playlist_name, retry_count + 1)
+        
+        # Si pas de retry ou limite atteinte, logger l'erreur normalement
+        global_stats.add_video_failure()
         if "music premium members" in error_str or "premium members" in error_str:
             logger.error(f"[{playlist_name}] PREMIUM REQUIS: {title}")
         elif "private" in error_str or "unavailable" in error_str:
             logger.error(f"[{playlist_name}] INDISPONIBLE: {title}")
+        elif "timeout" in error_str or "timed out" in error_str:
+            logger.error(f"[{playlist_name}] TIMEOUT DÉFINITIF après {retry_count + 1} tentatives: {title}")
+            with print_lock:
+                print(f"❌ Timeout définitif: {title[:50]}")
         else:
             logger.error(f"[{playlist_name}] ERREUR: {title} - {str(e)}")
         return False
@@ -552,7 +615,6 @@ def download_playlist_ultra_fast(playlist_url, video_threads=8):
 def download_all_playlists_parallel(playlist_urls, playlist_threads=3, video_threads_per_playlist=6):
     """Télécharge toutes les playlists en parallèle"""
     with print_lock:
-        print(f"\033[92m🚀 DÉMARRAGE ULTRA-OPTIMISÉ\033[0m")
         print(f"\033[94m📊 {len(playlist_urls)} playlists, {playlist_threads} playlists simultanées\033[0m")
         print(f"\033[95m⚙️  {video_threads_per_playlist} threads vidéo par playlist\033[0m")
     
@@ -674,33 +736,41 @@ def cleanup_old_logs():
         for log_file in logs_to_delete:
             try:
                 log_file.unlink()
-                print(f"\033[93m🧹 Log ancien supprimé: {log_file.name}\033[0m")
+                # print(f"\033[93m🧹 Log ancien supprimé: {log_file.name}\033[0m")
             except Exception:
                 pass  # Ignore si on ne peut pas supprimer
                 
         if logs_to_delete:
             print(f"\033[92m🗂️  Nettoyage terminé: {len(logs_to_delete)} anciens logs supprimés\033[0m")
-            print(f"\033[94m📁 {len(log_files) - len(logs_to_delete)} logs conservés\033[0m")
+            #print(f"\033[94m📁 {len(log_files) - len(logs_to_delete)} logs conservés\033[0m")
                     
     except Exception as e:
         print(f"\033[91m⚠️ Erreur lors du nettoyage des logs: {e}\033[0m")
         pass  # Ignore les erreurs de nettoyage
 
-def main():
-    """Fonction principale ultra-optimisée"""
-    # Écran de démarrage ULTRA STYLÉ
-    print("\033[95m" + "=" * 80)
-    print("██╗   ██╗██╗  ████████╗██████╗  █████╗     ██████╗  ██████╗ ██╗    ██╗███╗   ██╗██╗      ██████╗  █████╗ ██████╗ ███████╗██████╗ ")
-    print("██║   ██║██║  ╚══██╔══╝██╔══██╗██╔══██╗    ██╔══██╗██╔═══██╗██║    ██║████╗  ██║██║     ██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗")  
-    print("██║   ██║██║     ██║   ██████╔╝███████║    ██║  ██║██║   ██║██║ █╗ ██║██╔██╗ ██║██║     ██║   ██║███████║██║  ██║█████╗  ██████╔╝")
-    print("██║   ██║██║     ██║   ██╔══██╗██╔══██║    ██║  ██║██║   ██║██║███╗██║██║╚██╗██║██║     ██║   ██║██╔══██║██║  ██║██╔══╝  ██╔══██╗")
-    print("╚██████╔╝███████╗██║   ██║  ██║██║  ██║    ██████╔╝╚██████╔╝╚███╔███╔╝██║ ╚████║███████╗╚██████╔╝██║  ██║██████╔╝███████╗██║  ██║")
-    print(" ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝    ╚═════╝  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝")
-    print("\033[0m")
-    print("\033[96m" + "=" * 80 + "\033[0m")
+def print_banner():
+    """Affiche le logo ULTRA DOWNLOADER compact"""
+    print("\033[95m╔\033[95m" + "═" * 98 + "\033[95m╗\033[0m")
+    print("\033[95m║\033[0m" + " " * 98 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 25 + "\033[96m ██╗   ██╗██╗  ████████╗██████╗  █████╗ \033[0m" + " " * 32 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 25 + "\033[96m ██║   ██║██║  ╚══██╔══╝██╔══██╗██╔══██╗\033[0m" + " " * 32 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 25 + "\033[96m ██║   ██║██║     ██║   ██████╔╝███████║\033[0m" + " " * 32 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 25 + "\033[96m ██║   ██║██║     ██║   ██╔══██╗██╔══██║\033[0m" + " " * 32 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 25 + "\033[96m ╚██████╔╝███████╗██║   ██║  ██║██║  ██║\033[0m" + " " * 32 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 25 + "\033[96m  ╚═════╝ ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝\033[0m" + " " * 32 + "\033[95m║\033[0m")
+    print("\033[95m║\033[0m" + " " * 98 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 5 + "\033[97m ██████╗  ██████╗ ██╗    ██╗███╗   ██╗██╗      ██████╗  █████╗ ██████╗ ███████╗██████╗ \033[0m" + " " * 5 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 5 + "\033[97m ██╔══██╗██╔═══██╗██║    ██║████╗  ██║██║     ██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗\033[0m" + " " * 5 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 5 + "\033[97m ██║  ██║██║   ██║██║ █╗ ██║██╔██╗ ██║██║     ██║   ██║███████║██║  ██║█████╗  ██████╔╝\033[0m" + " " * 5 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 5 + "\033[97m ██║  ██║██║   ██║██║███╗██║██║╚██╗██║██║     ██║   ██║██╔══██║██║  ██║██╔══╝  ██╔══██╗\033[0m" + " " * 5 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 5 + "\033[97m ██████╔╝╚██████╔╝╚███╔███╔╝██║ ╚████║███████╗╚██████╔╝██║  ██║██████╔╝███████╗██║  ██║\033[0m" + " " * 5 + "\033[95m║\033[0m")
+    print("\033[95m║\033[95m " + " " * 5 + "\033[97m ╚═════╝  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝\033[0m" + " " * 5 + "\033[95m║\033[0m")
+    print("\033[95m║\033[0m" + " " * 98 + "\033[95m║\033[0m")
+    print("\033[95m╚\033[95m" + "═" * 98 + "\033[95m╝\033[0m")
+    time.sleep(3) # Pause de 3 secondes pour profiter du beau ascii art et mon script kiddes :D XD
     print()
-    print("\033[93m🎵 YOUTUBE MUSIC DOWNLOADER - VERSION ULTRA-OPTIMISÉE 🎵\033[0m")
-    print("\033[92m" + "─" * 80 + "\033[0m")
+    print("\033[95m " + " " * 8 + "\033[97m🎵 YOUTUBE MUSIC DOWNLOADER - VERSION ULTRA-OPTIMISÉE 🎵\033[0m")
+    print("\033[95m" + "=" * 80 + "\033[0m")
     print()
     print("\033[91m⚡ PERFORMANCES MAXIMALES:\033[0m")
     print("   \033[94m🚀 Playlists téléchargées en PARALLÈLE\033[0m")
@@ -709,18 +779,46 @@ def main():
     print("   \033[94m🧠 Gestion intelligente des doublons\033[0m")
     print("   \033[94m📊 Logging complet des erreurs\033[0m")
     print("   \033[94m🍪 Support Premium avec cookies\033[0m")
+    print("   \033[94m⏳ Système de fallback anti-timeout YouTube\033[0m")
     print()
-    time.sleep(3)  # Pause de 3 secondes pour profiter du beau ascii art et mon script kiddes :D XD
+    time.sleep(2)
+
+
+
+def main():
+    # Clear screen au démarrage pour un affichage propre
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+    print_banner()    
+    # Vérification automatique de mise à jour yt-dlp
+    print("\033[95m" + "=" * 80 + "\033[0m")
+    print()
     print(f"\033[95m📝 Logs de cette session: {log_filename}\033[0m")  
     # Nettoyer les anciens logs après avoir affiché le nom du nouveau
     cleanup_old_logs()
-    print("\033[95m" + "=" * 80)
+
+    try:
+        import yt_dlp
+        import urllib.request, json
+        local_version = yt_dlp.version.__version__
+        latest_version = None
+        with urllib.request.urlopen("https://pypi.org/pypi/yt-dlp/json", timeout=3) as resp:
+            data = json.load(resp)
+            latest_version = data["info"]["version"]
+        if latest_version and local_version != latest_version:
+            print(f"\033[93m⚠️  yt-dlp n'est pas à jour ! Version installée: {local_version} | Dernière: {latest_version}\033[0m")
+            print("\033[95m   ➡️  Mets à jour avec: pip install -U yt-dlp\033[0m")
+        else:
+            print(f"\033[92m✅ yt-dlp à jour ({local_version})\033[0m")
+    except Exception as e:
+        print(f"\033[91m⚠️  Impossible de vérifier la version yt-dlp ({e})\033[0m")
     print()
-    
+    print("\033[95m" + "=" * 80 + "\033[0m")
+    print()
     # Vérification des cookies d'authentification
     if Path('cookies.txt').exists():
-        print("\033[93m🍪 Cookies YouTube détectés - Test de l'accès Premium...\033[0m")
-        #logger.info("🍪 Cookies YouTube détectés et chargés pour l'authentification Premium")
+        print("\033[93m🍪 Cookies YouTube détectés !\033[0m")
+        #logger.info("🍪 Cookies YouTube détectés et chargés poour l'authentification Premium")
         
         # Tester l'accès Premium
         is_premium, message = test_premium_access()
@@ -728,14 +826,21 @@ def main():
         
         if is_premium:
             print("\033[92m     ✅ Prêt pour télécharger du contenu Premium !\033[0m")
+            print()
+            print("\033[95m" + "=" * 80 + "\033[0m")
             #logger.info("✅ Accès Premium confirmé par le test")
         else:
-            print("\033[91m     ⚠️  Accès limité - Certaines chansons Premium pourraient échouer lors du téléchargement\033[0m")
+            print("\033[91m   ❌ Test Premium échoué - Cookies peut-être expirés\033[0m")
+            print("\033[91m   ⚠️  Accès limité - Certaines chansons Premium pourraient échouer lors du téléchargement\033[0m")
             logger.warning("❌ Test Premium échoué - Cookies peut-être expirés")
+            print()
+            print("\033[95m" + "=" * 80 + "\033[0m")
             
     else:
         print("\033[94mℹ️  Pas de cookies détectés - Certaines chansons Premium pourraient échouer\033[0m")
         print("\033[95m📖 Consultez https://github.com/Felzow47/youtube-music-downloader/blob/main/docs/COOKIES_GUIDE.md pour configurer l'accès Premium\033[0m")
+        print()
+        print("\033[95m" + "=" * 80 + "\033[0m")
         #logger.info("ℹ️  Aucun fichier cookies.txt trouvé - Mode public uniquement")
     print()
     
@@ -766,16 +871,16 @@ def main():
     
     print(f"\n\033[92m📊 {len(validated_urls)} playlists validées\033[0m")
     
-    # Configuration avancée
+    # Configuration avancée - THREADS ILLIMITÉS
     try:
         playlist_threads = int(input("\033[95m🔀 Playlists simultanées (recommandé 2-3): \033[0m") or "2")
-        playlist_threads = max(1, min(playlist_threads, 4))
+        playlist_threads = max(1, playlist_threads)  # Pas de limite max !
     except ValueError:
         playlist_threads = 2
     
     try:
         video_threads = int(input("\033[95m⚙️  Threads vidéo par playlist (recommandé 6-8): \033[0m") or "6")
-        video_threads = max(1, min(video_threads, 12))
+        video_threads = max(1, video_threads)  # Pas de limite max !
     except ValueError:
         video_threads = 6
     
