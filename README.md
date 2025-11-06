@@ -2,6 +2,21 @@
 
 [🇬🇧 English version](docs/README_EN.md) | [📚 All documentation](docs/README.md)
 
+[![Python](https://img.shields.io/badge/Language-Python-blue.svg)](https://www.python.org)
+[![License](https://img.shields.io/badge/License-Public-red.svg)]()
+[![Status: Half-Abandoned](https://img.shields.io/badge/Status-Half--Abandoned-red.svg)]()
+
+Scripts pour télécharger YouTube Music rapidement — multithreading.
+
+
+
+> [!NOTE]
+> ⚠️ Probablement abandonné
+>
+> Je n'ai plus l'énergie pour maintenir ce projet à cause de problèmes récurrents avec youtube. 
+Je recommande d'utiliser : [youtube music playlist downloader de onnowhere](https://github.com/onnowhere/youtube_music_playlist_downloader)
+---
+
 J'en avais marre d'attendre des heures pour télécharger mes playlists, alors j'ai fait ce script.
 
 ## A propos
