@@ -405,17 +405,21 @@ def download_single_video(video_info, output_dir, playlist_name, retry_count=0):
     title = video_info.get('title', 'Unknown')[:50]
     url = f"https://www.youtube.com/watch?v={video_id}"
 
+
+    # Dossier temporaire pour le téléchargement/conversion
+    temp_work_dir = Path("downloads/temp_work")
+    temp_work_dir.mkdir(exist_ok=True)
     output_path = Path(output_dir)
-    # Vérifier si le fichier existe déjà (méthode sécurisée sans glob)
+
+    # Vérifier si le MP3 existe déjà dans le dossier cible
     if output_path.exists():
-        # Créer plusieurs variantes du titre pour la correspondance
         title_variants = [
-            title,  # Titre original
-            clean_filename(title),  # Version avec X au lieu de *
-            title.replace('***', 'XXX').replace('**', 'XX').replace('*', 'X'),  # Astérisques remplacées par X
-            title.replace('*', ''),  # Sans astérisques
-            title.replace('*', '_'),  # Astérisques remplacées par underscore
-            "".join(c for c in title if c.isalnum() or c in (' ', '-', '_', '.')).strip()  # Complètement sanitizé
+            title,
+            clean_filename(title),
+            title.replace('***', 'XXX').replace('**', 'XX').replace('*', 'X'),
+            title.replace('*', ''),
+            title.replace('*', '_'),
+            "".join(c for c in title if c.isalnum() or c in (' ', '-', '_', '.')).strip()
         ]
         for existing_file in output_path.iterdir():
             if existing_file.suffix.lower() == '.mp3':
@@ -428,63 +432,83 @@ def download_single_video(video_info, output_dir, playlist_name, retry_count=0):
     # Utiliser un hook pour récupérer le nom du fichier MP3 final
     final_mp3 = {'filename': None}
 
+    # Synchronisation stricte : attendre la fin réelle du téléchargement/conversion
+    finished_event = threading.Event()
+
     def mp3_postprocessor_hook(d):
-        """Hook appelé après la conversion MP3"""
         if d['status'] == 'finished':
             final_mp3['filename'] = d.get('info_dict', {}).get('filepath') or d.get('filepath')
+            finished_event.set()
 
     def progress_final_hook(d):
-        """Hook pour capturer le fichier final téléchargé"""
         if d['status'] == 'finished':
             if not final_mp3['filename']:
                 final_mp3['filename'] = d.get('filename')
+            finished_event.set()
 
-    ydl_opts = get_ultra_ydl_opts(output_dir)
-    ydl_opts = dict(ydl_opts)  # Copie défensive
+    # Options yt-dlp : sortie dans le dossier temporaire
+    ydl_opts = get_ultra_ydl_opts(str(temp_work_dir))
+    ydl_opts = dict(ydl_opts)
     ydl_opts['postprocessor_hooks'] = [mp3_postprocessor_hook]
-    # Garder le progress_hook d'origine + ajouter progress_final_hook
     ydl_opts['progress_hooks'] = [progress_hook, progress_final_hook]
-    
-    # Ajuster les timeouts selon le nombre de tentatives (backoff progressif)
     if retry_count > 0:
-        ydl_opts['socket_timeout'] = 60 + (retry_count * 30)  # 60s, 90s, 120s...
-        ydl_opts['fragment_retries'] = 5 + retry_count  # Plus de retries
+        ydl_opts['socket_timeout'] = 60 + (retry_count * 30)
+        ydl_opts['fragment_retries'] = 5 + retry_count
         ydl_opts['retries'] = 5 + retry_count
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.download([url])
-            
-        # DEBUG: Attendre un peu que FFmpeg finisse la conversion
-        time.sleep(1)
+        # Attendre explicitement la fin réelle du téléchargement/conversion
+        finished_event.wait(timeout=120)
 
         mp3_file_path = None
         if final_mp3['filename']:
             mp3_file_path = Path(final_mp3['filename'])
         else:
-            # Fallback : essayer de retrouver le fichier par titre si le hook n'a pas marché
-            for mp3_file in output_path.glob("*.mp3"):
+            for mp3_file in temp_work_dir.glob("*.mp3"):
                 if clean_filename(title).lower() in mp3_file.stem.lower():
                     mp3_file_path = mp3_file
                     break
 
+        # Déplacement du MP3 dans le dossier cible
         if mp3_file_path and mp3_file_path.exists():
-            # MP3 validé
-            file_size = mp3_file_path.stat().st_size / (1024 * 1024)
-            with print_lock:
-                print(f"✅ MP3 validé: {mp3_file_path.name[:50]} ({file_size:.1f} MB)")
-
+            dest_path = output_path / mp3_file_path.name
             try:
-                cleanup_temp_files(output_path, mp3_file_path.name)
-            except:
-                pass
-            global_stats.add_video_success()
-            return True
+                mp3_file_path.replace(dest_path)
+            except Exception as e:
+                logger.error(f"Erreur déplacement MP3: {e}")
+                dest_path = mp3_file_path
+
+            # Validation après déplacement
+            if dest_path.exists() and dest_path.stat().st_size > 1024 * 1024:
+                file_size = dest_path.stat().st_size / (1024 * 1024)
+                with print_lock:
+                    print(f"✅ MP3 validé: {dest_path.name[:50]} ({file_size:.1f} MB)")
+                global_stats.add_video_success()
+                # Nettoyage des fichiers temporaires
+                for f in temp_work_dir.glob(f"{clean_filename(title)}*.*"):
+                    try:
+                        f.unlink()
+                    except:
+                        pass
+                for ext in [".part", ".m4a", ".mp4"]:
+                    for f in temp_work_dir.glob(f"*{ext}"):
+                        try:
+                            f.unlink()
+                        except:
+                            pass
+                return True
+            else:
+                global_stats.add_video_failure()
+                with print_lock:
+                    print(f"❌ Échec validation MP3: {title[:50]}")
+                logger.error(f"[{playlist_name}] MP3 non trouvé ou trop petit: {title}")
+                return False
         else:
-            # DEBUG: Chercher les fichiers .part pour voir ce qui reste
-            part_files = list(output_path.glob("*.part"))
-            mp4_files = list(output_path.glob("*.mp4"))
-            
+            # Chercher les fichiers .part/.mp4 dans le dossier temporaire
+            part_files = list(temp_work_dir.glob("*.part"))
+            mp4_files = list(temp_work_dir.glob("*.mp4"))
             global_stats.add_video_failure()
             with print_lock:
                 print(f"❌ Échec validation MP3: {title[:50]}")
@@ -492,28 +516,19 @@ def download_single_video(video_info, output_dir, playlist_name, retry_count=0):
                     print(f"   ⚠️  {len(part_files)} fichiers .part trouvés (téléchargement incomplet)")
                 if mp4_files:
                     print(f"   ⚠️  {len(mp4_files)} fichiers .mp4 trouvés (conversion échouée?)")
-                    
             logger.error(f"[{playlist_name}] MP3 non trouvé: {title} - .part={len(part_files)}, .mp4={len(mp4_files)}")
             return False
 
     except Exception as e:
         error_str = str(e).lower()
-        
-        # FALLBACK AUTOMATIQUE EN CAS DE TIMEOUT
         if ("timeout" in error_str or "timed out" in error_str or 
             "unable to download" in error_str or "http error 429" in error_str or
             "too many requests" in error_str) and retry_count < 3:
-            
-            # Attendre avant de réessayer (backoff exponentiel)
-            wait_time = 5 * (2 ** retry_count)  # 5s, 10s, 20s
+            wait_time = 5 * (2 ** retry_count)
             with print_lock:
                 print(f"⏳ Timeout détecté pour {title[:30]}... Attente {wait_time}s puis nouvelle tentative ({retry_count + 1}/3)")
             time.sleep(wait_time)
-            
-            # RETRY RÉCURSIF avec backoff
             return download_single_video(video_info, output_dir, playlist_name, retry_count + 1)
-        
-        # Si pas de retry ou limite atteinte, logger l'erreur normalement
         global_stats.add_video_failure()
         if "music premium members" in error_str or "premium members" in error_str:
             logger.error(f"[{playlist_name}] PREMIUM REQUIS: {title}")
@@ -802,10 +817,17 @@ def main():
         import urllib.request, json
         local_version = yt_dlp.version.__version__
         latest_version = None
+        min_version = "2023.01.06"  # Version minimale recommandée
         with urllib.request.urlopen("https://pypi.org/pypi/yt-dlp/json", timeout=3) as resp:
             data = json.load(resp)
             latest_version = data["info"]["version"]
-        if latest_version and local_version != latest_version:
+        def version_tuple(v):
+            return tuple(map(int, v.replace("-", ".").replace("_", ".").split(".")))
+        if version_tuple(local_version) < version_tuple(min_version):
+            print(f"\033[91m❌ yt-dlp trop ancien ! Version installée: {local_version} | Minimum: {min_version}\033[0m")
+            print("\033[95m   ➡️  Mets à jour avec: pip install -U yt-dlp\033[0m")
+            sys.exit(1)
+        elif latest_version and local_version != latest_version:
             print(f"\033[93m⚠️  yt-dlp n'est pas à jour ! Version installée: {local_version} | Dernière: {latest_version}\033[0m")
             print("\033[95m   ➡️  Mets à jour avec: pip install -U yt-dlp\033[0m")
         else:
@@ -895,14 +917,52 @@ def main():
     try:
         download_all_playlists_parallel(validated_urls, playlist_threads, video_threads)
         print_final_stats()
-        
+        # Nettoyage du dossier temporaire après tous les téléchargements
+        temp_work_dir = Path("downloads/temp_work")
+        if temp_work_dir.exists():
+            for f in temp_work_dir.glob("*"):
+                try:
+                    f.unlink()
+                except:
+                    pass
+            try:
+                temp_work_dir.rmdir()
+            except:
+                pass
+            print("\033[92m🧹 Dossier temporaire nettoyé après tous les téléchargements\033[0m")
     except KeyboardInterrupt:
         print("\n\033[93m⏹️  Arrêt demandé par l'utilisateur\033[0m")
         print_final_stats()
+        # Nettoyage même en cas d'interruption
+        temp_work_dir = Path("downloads/temp_work")
+        if temp_work_dir.exists():
+            for f in temp_work_dir.glob("*"):
+                try:
+                    f.unlink()
+                except:
+                    pass
+            try:
+                temp_work_dir.rmdir()
+            except:
+                pass
+            print("\033[92m🧹 Dossier temporaire nettoyé après interruption\033[0m")
     except Exception as e:
         print(f"\n\033[91m❌ Erreur critique: {str(e)}\033[0m")
         logger.error(f"Erreur critique main: {str(e)}")
         print_final_stats()
+        # Nettoyage même en cas d'erreur
+        temp_work_dir = Path("downloads/temp_work")
+        if temp_work_dir.exists():
+            for f in temp_work_dir.glob("*"):
+                try:
+                    f.unlink()
+                except:
+                    pass
+            try:
+                temp_work_dir.rmdir()
+            except:
+                pass
+            print("\033[92m🧹 Dossier temporaire nettoyé après erreur\033[0m")
 
 if __name__ == "__main__":
     main()
