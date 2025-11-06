@@ -2,6 +2,17 @@
 
 [🇫🇷 Version française](../README.md)
 
+[![Python](https://img.shields.io/badge/Language-Python-blue.svg)](https://www.python.org)
+[![License](https://img.shields.io/badge/License-Public-red.svg)]()
+[![Status: Half-Abandoned](https://img.shields.io/badge/Status-Half--Abandoned-red.svg)]()
+
+Scripts for download music on youtube music - Multithreading
+
+> [!NOTE]
+> ⚠️This project is probably abandoned.
+> I no longer have the energy to maintain it due to ongoing issues with YouTube
+> I recommend using : [youtube music playlist downloader de onnowhere](https://github.com/onnowhere/youtube_music_playlist_downloader)
+---
 I was tired of waiting hours to download my playlists, so I made this script.
 
 ## About
