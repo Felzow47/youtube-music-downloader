@@ -11,7 +11,7 @@ Scripts for download music on youtube music - Multithreading
 > [!NOTE]
 > ⚠️This project is probably abandoned.
 > I no longer have the energy to maintain it due to ongoing issues with YouTube
-> I recommend using : [youtube music playlist downloader de onnowhere](https://github.com/onnowhere/youtube_music_playlist_downloader)
+> I recommend using : [youtube music playlist downloader from Blaze414](https://github.com/Blaze414/youtube-music-ultra-downloader)
 ---
 I was tired of waiting hours to download my playlists, so I made this script.
 
