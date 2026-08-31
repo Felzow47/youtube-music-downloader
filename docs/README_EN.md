@@ -24,7 +24,8 @@ I was tired of waiting hours to download my playlists, so I made this script.
 
 ## Results
 
-100-song playlist: ~5 minutes instead of 20
+100-song playlist: ~5 minutes instead of 20 minutes 
+
 400-song playlist: ~15 minutes instead of 2h
 
 ## Installation
