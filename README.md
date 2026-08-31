@@ -28,7 +28,7 @@ J'en avais marre d'attendre des heures pour télécharger mes playlists, alors j
 
 ## Résultats
 
-Playlist de 100 titres : ~5 minutes au lieu de 20
+Playlist de 100 titres : ~5 minutes au lieu de 20 minutes
 Playlist de 400 titres : ~15 minutes au lieu de 2h
 
 ## Installation
